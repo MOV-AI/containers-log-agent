@@ -1,0 +1,65 @@
+# Fluent Bit Configuration for Manager Node
+# YAML format supports native environment variable substitution
+# Usage: docker run -e DEVICE_NAME=manager -e APP_NAME=fleet fluent-bit -c fluent-bit-manager.yaml
+
+service:
+  flush: 1
+  daemon: off
+  log_level: ${LOG_LEVEL:info}
+  http_server: true
+  http_listen: 0.0.0.0
+  http_port: 2020
+  parsers_file: /fluent-bit/etc/parsers.conf
+
+  # Storage configuration for reliability
+  storage:
+    path: /var/log/flb-storage/
+    sync: normal
+    checksum: false
+    max_chunks_up: 128
+    backlog_mem_limit: 10M
+    total_limit_size: 500M
+
+# Forward Input - Receives logs from other Fluent Bit instances or applications
+pipeline:
+  inputs:
+    - name: forward
+      listen: 0.0.0.0
+      port: 24224
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+
+  # Optional: Monitor Docker container logs directly
+  # Uncomment to enable tail input for Docker logs
+  # inputs:
+  #   - name: tail
+  #     path: /var/lib/docker/containers/*/*.log
+  #     parser: docker
+  #     tag: docker.*
+  #     refresh_interval: 5
+  #     mem_buf_limit: 5MB
+  #     skip_long_lines: true
+  #     db: /var/log/flb_docker.db
+  #     path_key: filepath
+
+  # Optional: Extract container metadata
+  # filters:
+  #   - name: lua
+  #     match: docker.*
+  #     script: /fluent-bit/etc/extract_container.lua
+  #     call: extract_container_name
+
+  # Loki Output - Send logs to centralized aggregator
+  outputs:
+    - name: loki
+      match: docker.*
+      host: ${LOKI_HOST:loki}
+      port: ${LOKI_PORT:3100}
+      labels: robot=${DEVICE_NAME:manager},service=${APP_NAME:default},source=docker
+      label_keys: $container_name
+      remove_keys: container_id
+      line_format: key_value
+      compress: snappy
+      workers: 2
+      retry_limit: false
+      net.dns.mode: TCP

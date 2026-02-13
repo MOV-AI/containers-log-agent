@@ -1,0 +1,50 @@
+# Fluent Bit Configuration - Generic
+env:
+  # cannot be overridden by ENV vars if defined here
+  # LOG_LEVEL: info
+  # LOKI_HOST: loki
+  # LOKI_PORT: 3100
+  # DEVICE_NAME: default-device
+  # APP_NAME: default-app
+  FLUSH_INTERVAL: 1
+service:
+  flush: ${FLUSH_INTERVAL}
+  daemon: off
+  log_level: ${LOG_LEVEL}
+  http_server: true
+  http_listen: 0.0.0.0
+  http_port: 2020
+  parsers_file: /fluent-bit/etc/parsers.conf
+
+# Storage configuration for reliability
+storage:
+  path: /var/log/flb-storage/
+  sync: normal
+  checksum: off
+  max_chunks_up: 128
+  backlog_mem_limit: 10M
+  total_limit_size: 500M
+
+# Forward Input - Receives logs from other Fluent Bit instances or applications
+pipeline:
+  inputs:
+    - name: forward
+      listen: 0.0.0.0
+      port: 24224
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+
+  outputs:
+    - name: loki
+      match: docker.*
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=docker
+      label_keys: $container_name
+      remove_keys: container_id
+      line_format: key_value
+      compress: snappy
+      workers: 2
+      retry_limit: false
+      net.dns.mode: TCP
