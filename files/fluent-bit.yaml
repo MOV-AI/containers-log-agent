@@ -41,7 +41,7 @@ pipeline:
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
-      label_keys: $container_name
+      label_keys: $container_name,$service,$robot
       remove_keys: container_id
       line_format: key_value
       compress: snappy
