@@ -2,7 +2,7 @@
 FROM busybox:1.37.0 AS busybox_builder
 
 # Main image
-FROM fluent/fluent-bit:4.2.2 AS base
+FROM fluent/fluent-bit:4.2.3.1 AS base
 
 # Copy busybox from builder stage
 COPY --from=busybox_builder /bin/busybox /bin/busybox
