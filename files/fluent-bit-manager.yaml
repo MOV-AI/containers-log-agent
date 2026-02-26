@@ -17,8 +17,8 @@ service:
     sync: normal
     checksum: false
     max_chunks_up: 128
-    backlog_mem_limit: 10M
-    total_limit_size: 500M
+    backlog_mem_limit: ${FLUENT_BIT_BACKLOG_MEM_LIMIT:10M}
+    total_limit_size: ${FLUENT_BIT_TOTAL_LIMIT_SIZE:500M}
 
 # Forward Input - Receives logs from other Fluent Bit instances or applications
 pipeline:
@@ -27,7 +27,7 @@ pipeline:
       listen: 0.0.0.0
       port: 24224
       buffer_chunk_size: 1M
-      buffer_max_size: 6M
+      buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE:6M}
 
   # Optional: Monitor Docker container logs directly
   # Uncomment to enable tail input for Docker logs
