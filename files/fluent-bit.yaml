@@ -28,23 +28,87 @@ storage:
 # Forward Input - Receives logs from other Fluent Bit instances or applications
 pipeline:
   inputs:
+    # Logs input - accepts logs via TCP socket
     - name: forward
       listen: 0.0.0.0
       port: 24224
       buffer_chunk_size: 1M
       buffer_max_size: 6M
 
+    # Metrics input - accepts metrics via TCP socket
+    - name: forward
+      listen: 0.0.0.0
+      port: 24225
+      tag: metrics.*
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+
+  filters:
+    # Parse MOV.AI application logs (backend, spawner, etc.)
+    - name: parser
+      match: docker.backend*,docker.spawner*,docker.orchestrator*,docker.ros-ws*
+      key_name: log
+      parser: app_logs
+      preserve_key: true
+      reserve_data: true
+
+    # Generic fallback parser for other containers (redis, etc.)
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: docker
+      preserve_key: true
+      reserve_data: true
+
   outputs:
+    # Logs output to Loki
     - name: loki
       match: docker.*
       log_level: ${LOG_LEVEL}
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
-      label_keys: $container_name,$service,$robot
+      label_keys: $container_name,$service,$robot,$user_log
       remove_keys: container_id
       line_format: key_value
       compress: snappy
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+
+    # # Logs output to InfluxDB (optional)
+    # - name: influxdb
+    #   match: docker.*
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: app_logs
+    #   tag_keys: level,user_log,service,robot
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:
+
+    # # Metrics output to InfluxDB
+    # - name: influxdb
+    #   match: metrics.*
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: metrics
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:
