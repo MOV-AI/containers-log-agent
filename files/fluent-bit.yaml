@@ -6,7 +6,7 @@ env:
   # LOKI_PORT: 3100
   # DEVICE_NAME: default-device
   # APP_NAME: default-app
-  FLUSH_INTERVAL: 1
+  FLUSH_INTERVAL: 5
 service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
@@ -28,23 +28,107 @@ storage:
 # Forward Input - Receives logs from other Fluent Bit instances or applications
 pipeline:
   inputs:
+    # Logs input - accepts logs via TCP socket
     - name: forward
       listen: 0.0.0.0
       port: 24224
       buffer_chunk_size: 1M
       buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE:6M}
 
+    # Metrics input - accepts metrics via TCP socket
+    - name: forward
+      listen: 0.0.0.0
+      port: 24225
+      tag: metrics.*
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+
+  filters:
+    # Lua filter to strip ANSI color codes from log field
+    # Must run BEFORE parsers so all parsers work with clean data
+    # Also extracts ui and node tags from callback_logs format
+    - name: lua
+      match: docker.*
+      script: /fluent-bit/etc/parse_callback_tags.lua
+      call: parse_callback_tags
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: callback_logs
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: python_structured
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: app_logs
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: docker
+      preserve_key: true
+      reserve_data: true
+
   outputs:
+    # Logs output to Loki
     - name: loki
       match: docker.*
       log_level: ${LOG_LEVEL}
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
-      label_keys: $container_name,$service,$robot
+      label_keys: $container_name,$service,$robot,$user_log,$ui,$node,$has_ui,$has_node,$tags,$level,$module,$funcName,$lineno
       remove_keys: container_id
       line_format: key_value
       compress: snappy
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+
+    # # Logs output to InfluxDB (optional)
+    # - name: influxdb
+    #   match: docker.*
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: app_logs
+    #   tag_keys: level,user_log,service,robot
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:
+
+    # # Metrics output to InfluxDB
+    # - name: influxdb
+    #   match: metrics.*
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: metrics
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:

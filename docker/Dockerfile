@@ -16,8 +16,6 @@ LABEL description="MOV.AI Log Agent - Fluent Bit based log collector and forward
       org.opencontainers.image.title="MOV.AI Log Agent"
 
 # Configuration Files: YAML Format
-# - fluent-bit-manager.yaml: Configuration for manager/aggregator role
-# - fluent-bit-worker.yaml: Configuration for worker/agent role
 # - fluent-bit.yaml: Common Fluent Bit settings (e.g., service, parsers, filters)
 # - parsers.conf: Log parsing rules for different log formats
 # - extract_container.lua: Lua script for Docker container metadata extraction
