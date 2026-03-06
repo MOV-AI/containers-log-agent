@@ -6,7 +6,7 @@ env:
   # LOKI_PORT: 3100
   # DEVICE_NAME: default-device
   # APP_NAME: default-app
-  FLUSH_INTERVAL: 1
+  FLUSH_INTERVAL: 5
 service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
@@ -44,15 +44,35 @@ pipeline:
       buffer_max_size: 6M
 
   filters:
-    # Parse MOV.AI application logs (backend, spawner, etc.)
+    # Lua filter to strip ANSI color codes from log field
+    # Must run BEFORE parsers so all parsers work with clean data
+    # Also extracts ui and node tags from callback_logs format
+    - name: lua
+      match: docker.*
+      script: /fluent-bit/etc/parse_callback_tags.lua
+      call: parse_callback_tags
+
     - name: parser
-      match: docker.backend*,docker.spawner*,docker.orchestrator*,docker.ros-ws*
+      match: docker.*
+      key_name: log
+      parser: callback_logs
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: python_structured
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
       key_name: log
       parser: app_logs
       preserve_key: true
       reserve_data: true
 
-    # Generic fallback parser for other containers (redis, etc.)
     - name: parser
       match: docker.*
       key_name: log
@@ -68,7 +88,7 @@ pipeline:
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
-      label_keys: $container_name,$service,$robot,$user_log
+      label_keys: $container_name,$service,$robot,$user_log,$ui,$node,$has_ui,$has_node,$tags,$level,$module,$funcName,$lineno
       remove_keys: container_id
       line_format: key_value
       compress: snappy

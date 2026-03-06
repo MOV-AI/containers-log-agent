@@ -1,0 +1,222 @@
+# WARNING:
+#   This configuration is for local development. Do not use it in a production deployment.
+#
+# Purpose: Worker node environment for testing distributed logging setup
+# Services: Fluent Bit, Loki, Grafana, Redis, Spawner, InfluxDB, Telegraf
+# Logging: Docker fluentd driver forwards logs to Fluent Bit (no network address when local)
+# Parsing: MOV.AI structured format (spawner) + generic JSON (redis)
+# Visualization: Grafana @ http://200.168.1.254:3000 (admin/admin)
+#
+# Configuration: Simulates worker node that sends logs to manager node
+# Note: In production, fluent-bit-agent.yaml would forward to manager's Loki instance
+#
+# Feel free to modify this file to suit your needs.
+---
+name: worker-test
+
+x-movai-common:
+  &movai-common
+  environment:
+    &movai-common-env
+    MOVAI_ENV: ${MOVAI_ENV:-qa}
+    LOGLEVEL: WARNING
+    MOVAI_USERSPACE: /opt/mov.ai/user
+    MOVAI_MANAGER_URI: https://manager.dummy.local
+    MOVAI_DEVICE_NAME: worker-test
+    FLEET_NAME: loki-test
+    FLEET_TOKEN: flow-initiator-test
+    REDIS_LOCAL_PORT: 6379
+    REDIS_LOCAL_HOST: redis-local
+    REDIS_MASTER_PORT: 6379
+    REDIS_MASTER_HOST: manager.dummy.local
+    ROS_MASTER_URI: http://ros-master:11311/
+    PUBLIC_IP: worker1.dummy.local
+    LOG_HTTP_HOST:
+    APT_AUTOINSTALL: "once"
+    APT_KEYS_URL_LIST: "https://artifacts.cloud.mov.ai/repository/movai-applications/gpg"
+    APT_REPOS_LIST: "deb [arch=all] https://artifacts.cloud.mov.ai/repository/ppa-testing testing main"
+  logging: &movai-common-logging
+    driver: fluentd
+    options:
+      fluentd-address: 200.168.1.1:24224
+      tag: "docker.{{.Name}}"
+      labels: "service={{.Name}},robot=manager-test"
+      env: "MOVAI_ENV"
+
+services:
+
+  redis-slave:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
+    container_name: redis-slave-worker-test
+    networks:
+      - private
+    command: ["--slaveof manager.dummy.local 6379"]
+    healthcheck:
+      test: ["CMD", "echo", ">", "/dev/tcp/localhost/6379"]
+      start_period: 3s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    volumes:
+      - redis-slave-worker-test-test-volume:/data
+    environment:
+      <<: *movai-common-env
+      APT_INSTALL_LIST:
+    logging: *movai-common-logging
+
+  redis-local:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
+    container_name: redis-local-worker-test
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "echo", ">", "/dev/tcp/localhost/6380"]
+      start_period: 3s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    volumes:
+      - redis-local-worker-test-test-volume:/data
+    environment:
+      <<: *movai-common-env
+      APT_INSTALL_LIST:
+    logging: *movai-common-logging
+
+
+  spawner:
+    <<: *movai-common
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/spawner-ign-noetic:v3.1.33
+    privileged: true
+    networks:
+      - private
+    depends_on:
+      redis-local:
+        condition: service_healthy
+      redis-slave:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    healthcheck:
+      test: pgrep -f "/usr/bin/python3 -m flow_initiator"
+      start_period: 10s
+      interval: 10s
+      timeout: 3s
+      retries: 1
+    container_name: spawner-worker-test
+    volumes:
+      - /dev:/dev
+      - /sys/devices:/sys/devices
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+      - /run/movai:/var/run/movai
+      - ./worker_userspace:/opt/mov.ai/user
+      - ./worker_shared:/opt/mov.ai/shared
+      - ./worker_logs:/opt/mov.ai/logs
+      - ./scripts:/opt/mov.ai/scripts
+    environment:
+      <<: *movai-common-env
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      APP_NAME: spawner
+      APT_INSTALL_LIST: $FLOW_INITIATOR_SPAWNER_PACKAGES
+    logging: *movai-common-logging
+    # restart: unless-stopped
+  influxdb:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/influxdb:v1.2.1
+    container_name: influxdb-worker-test
+    volumes:
+      - influxdb:/var/lib/influxdb
+    networks:
+      - private
+    hostname: influxdb
+    environment:
+      - TZ=Europe/Lisbon
+      - TZDATA_TZ=Europe/Lisbon
+      - TZDATA=/usr/share/zoneinfo
+    restart: always
+
+  telegraf:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/telegraf:v1.3.2
+    container_name: telegraf-worker-test
+    hostname: telegraf
+    networks:
+      - private
+    volumes:
+      - "/etc:/hostfs/etc:ro"
+      - "/sys:/hostfs/sys:ro"
+      - "/var:/hostfs/var:ro"
+      - "/run:/hostfs/run:ro"
+      - "/proc:/hostfs/proc:ro"
+      - "/run/udev:/run/udev:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:rw"
+    # telegraf does not run as root
+    # get access to docker socket for telegraf user on host and on container
+    # to be able to collect docker stats
+    user: "telegraf:${TELEGRAF_GID}"
+    privileged: true
+    security_opt:
+      - apparmor:unconfined
+    restart: always
+    depends_on:
+      - influxdb
+    environment:
+      - TZ=Europe/Lisbon
+      - TZDATA_TZ=Europe/Lisbon
+      - TZDATA=/usr/share/zoneinfo
+      - TELEGRAF_HOSTNAME=telegraf
+      - TELEGRAF_CONFIG_LEVEL=production
+      - HOST_ETC=/hostfs/etc
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
+      - HOST_VAR=/hostfs/var
+      - HOST_RUN=/hostfs/run
+      - HOST_MOUNT_PREFIX=/hostfs
+
+
+  fluent-bit:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    container_name: fluent-bit-worker-test
+    hostname: fluent-bit
+    networks:
+      - private
+    ports:
+      - "200.168.1.1:24224:24224" # Fluent Bit listens on this port for fluentd input
+    volumes:
+      - fluent-bit-storage-worker-test:/var/log/flb-storage/
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "/bin/busybox", "pidof", "fluent-bit"]
+      start_period: 1s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  influxdb-data:
+  fluent-bit-storage-worker-test:
+  redis-slave-worker-test-test-volume:
+  redis-local-worker-test-test-volume:
+networks:
+  private:
+    name: worker-test-private
