@@ -9,7 +9,7 @@
 #
 # Quick start:
 #   docker compose up -d
-#   docker exec spawner-manager-test python3 /opt/mov.ai/tests/stress_logs_movai.py
+#   docker exec spawner-manager-test python3 /opt/mov.ai/scripts/stress_logs_movai.py
 #   Open http://200.168.1.254:3000 → Explore → Loki
 #
 # Feel free to modify this file to suit your needs.
@@ -42,7 +42,7 @@ x-movai-common:
     options:
       fluentd-address: 200.168.1.254:24224
       tag: "docker.{{.Name}}"
-      labels: "service={{.Name}},robot=manager-test"
+      labels: "service,robot"
       env: "MOVAI_ENV"
 
 services:
@@ -63,11 +63,12 @@ services:
     ports:
       - 200.168.1.254:6379:6379
     volumes:
-      - redis-master-manager-test-test-volume:/data
+      - redis-master-manager-test:/data
     environment:
       <<: *movai-common-env
       APT_INSTALL_LIST:
     logging: *movai-common-logging
+    labels: { service: redis-master, robot: manager-test }
 
   redis-local:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
@@ -84,12 +85,12 @@ services:
       fluent-bit:
         condition: service_healthy
     volumes:
-      - redis-local-manager-test-test-volume:/data
+      - redis-local-manager-test:/data
     environment:
       <<: *movai-common-env
       APT_INSTALL_LIST:
     logging: *movai-common-logging
-
+    labels: { service: redis-local, robot: manager-test }
   backend:
     <<: *movai-common
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/qa/backend-noetic:3.27.0.2
@@ -125,6 +126,7 @@ services:
       timeout: 2s
       retries: 3
     logging: *movai-common-logging
+    labels: { service: backend, robot: manager-test }
 
   spawner:
     <<: *movai-common
@@ -165,7 +167,8 @@ services:
       APP_NAME: spawner
       APT_INSTALL_LIST: $FLOW_INITIATOR_SPAWNER_PACKAGES
     logging: *movai-common-logging
-    # restart: unless-stopped
+    labels: { service: spawner, robot: manager-test }
+
   influxdb:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/influxdb:v1.2.1
     container_name: influxdb-manager-test
@@ -175,12 +178,19 @@ services:
       - influxdb:/var/lib/influxdb
     networks:
       - private
+    healthcheck:
+      test: ["CMD", "pidof", "influxd"]
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
     hostname: influxdb
     environment:
       - TZ=Europe/Lisbon
       - TZDATA_TZ=Europe/Lisbon
       - TZDATA=/usr/share/zoneinfo
     restart: always
+    logging: *movai-common-logging
+    labels: { service: influxdb, robot: manager-test }
 
   monitoring:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/monitoring:v1.0.2
@@ -194,7 +204,10 @@ services:
       - monitoring-kapacitor:/var/lib/kapacitor
     restart: always
     depends_on:
-      - influxdb
+      influxdb:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
     environment:
       - TZ=Europe/Lisbon
       - TZDATA_TZ=Europe/Lisbon
@@ -206,6 +219,8 @@ services:
       - KAPACITOR_SLACK_CHANNEL=
       - KAPACITOR_SLACK_WORKSPACE=
       - KAPACITOR_SLACK_ENABLED=true
+    logging: *movai-common-logging
+    labels: { service: monitoring, robot: manager-test }
 
   telegraf:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/telegraf:v1.3.2
@@ -230,7 +245,10 @@ services:
       - apparmor:unconfined
     restart: always
     depends_on:
-      - influxdb
+      influxdb:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
     environment:
       - TZ=Europe/Lisbon
       - TZDATA_TZ=Europe/Lisbon
@@ -243,6 +261,8 @@ services:
       - HOST_VAR=/hostfs/var
       - HOST_RUN=/hostfs/run
       - HOST_MOUNT_PREFIX=/hostfs
+    logging: *movai-common-logging
+    labels: { service: telegraf, robot: manager-test }
 
   loki:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/log-aggregator:1.0.5
@@ -275,6 +295,7 @@ services:
       redis-local:
         condition: service_healthy
     logging: *movai-common-logging
+    labels: { service: loki, robot: manager-test }
 
   fluent-bit:
     build:
@@ -308,6 +329,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels: { service: fluent-bit, robot: manager-test }
 
   grafana:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/obs-dashboard:1.0.2
@@ -326,6 +348,8 @@ services:
     depends_on:
       loki:
         condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - private
@@ -336,14 +360,15 @@ services:
       timeout: 5s
       retries: 5
     logging: *movai-common-logging
+    labels: { service: grafana, robot: manager-test }
 
 volumes:
   grafana-data:
   loki-data:
   influxdb-data:
   fluent-bit-storage-manager-test:
-  redis-master-manager-test-test-volume:
-  redis-local-manager-test-test-volume:
+  redis-master-manager-test:
+  redis-local-manager-test:
   influxdb:
   monitoring-chronograf:
   monitoring-kapacitor:

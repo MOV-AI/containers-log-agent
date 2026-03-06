@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
-import logging as std_logging
 import os
-from pathlib import Path
-import sys
 import time
 import uuid
 

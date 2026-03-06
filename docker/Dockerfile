@@ -24,7 +24,7 @@ COPY files/*.conf /fluent-bit/etc/
 COPY files/*.lua /fluent-bit/etc/
 
 # Environment Variables
-ENV LOG_LEVEL=debug
+ENV LOG_LEVEL=info
 ENV DEVICE_NAME=manager
 ENV APP_NAME=default
 ENV LOKI_HOST=loki
