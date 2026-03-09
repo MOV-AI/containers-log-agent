@@ -17,7 +17,7 @@ The Log Agent is a lightweight, efficient logging solution designed for the MOV.
 - **HTTP Metrics**: Built-in HTTP server for monitoring and metrics
 - **Container-aware**: Can extract container metadata from logs
 - **Compression**: Snappy compression support for efficient transmission
-- **ANSI Filtering**: Automatic color code removal before parsing
+- **ANSI Filtering**: Automatic color code removal via Lua post-processing filter
 
 ## Configuration
 
@@ -45,22 +45,18 @@ flowchart TD
     B -->|Yes| C[Re-tag to<br/>movai.logs]
     B -->|No| D[Keep tag<br/>docker.*]
 
-    C --> E[Lua Filter<br/>Strip ANSI + Extract Tags]
-    E --> F[callback_logs Parser]
-    F --> G[python_structured Parser]
-    G --> H[modify: levelname → level]
-    H --> I[Generic Parsers<br/>app_logs, docker]
+    C --> E[callback_logs Parser<br/>+ Lua Filter]
+    E --> F[python_structured Parser]
+    F --> G[Generic Parsers<br/>app_logs, docker]
 
-    D --> I
+    D --> G
 
-    I --> J[Loki Output<br/>match: *]
+    G --> H[Loki Output<br/>match: *]
 
     style C fill:#e1f5dd
     style E fill:#fff4e6
     style F fill:#fff4e6
-    style G fill:#fff4e6
-    style H fill:#fff4e6
-    style I fill:#e3f2fd
+    style G fill:#e3f2fd
 ```
 
 #### Stage 1: Service-Based Routing
@@ -76,30 +72,51 @@ rewrite_tag:
 #### Stage 2: MOV.AI Structured Log Processing
 Applied **only** to logs tagged as `movai.logs`:
 
-1. **Lua Pre-processing** (parse_callback_tags.lua):
-   - Strip ANSI color codes from log field
+1. **Structured Parsers** (in order):
+   - `callback_logs`: Parse MOV.AI callback format with dynamic tags (requires tags field)
+   - `python_structured`: Parse Python structured logging format with flexible timestamp precision
+   - (Implicit field normalization: consistent field names across all parsers)
+
+2. **Lua Post-processing** (parse_callback_tags.lua):
    - Extract special tags from callback format:
-     - `ui`: True/False indicator
-     - `node`: Robot/node identifier
-     - `has_ui`, `has_node`: Presence flags
-   - **Critical**: Runs BEFORE parsers to ensure clean data
+     - `ui`: True/False indicator (case-sensitive, exact match only)
+     - `node`: Robot/node identifier (whitespace trimmed)
+     - `has_ui`, `has_node`: Boolean presence flags
+   - Safely strip ANSI color codes from log field (type-checked, conditional on ESC char)
+   - Performance-optimized: conditional operations, no loops
+   - **Applied to**: `movai.logs` tag only (after parsing)
 
-2. **Structured Parsers**:
-   - `callback_logs`: Parse MOV.AI callback format with dynamic tags
-   - `python_structured`: Parse Python structured logging format
-   - `modify`: Normalize `levelname` → `level` for Loki labels
+### Parser Configuration
 
-#### Stage 3: Generic Fallback Parsing
-Applied to **all** logs (both `movai.logs` and `docker.*`):
+All parsers in `files/parsers.conf` are optimized for production use:
 
-- `app_logs`: Parse standard MOV.AI application format
-- `docker`: Parse generic JSON Docker logs
+| Parser | Format | Timestamp Required | Special Features |
+|--------|--------|------------------|------------------|
+| `docker` | JSON | ISO8601 with ms | Standard Docker engine logs |
+| `app_logs` | Regex | Seconds (optional ms) | Supports optional `user_log` field |
+| `python_structured` | Regex | Seconds (flexible) | Accepts both `,` and `.` ms separators |
+| `callback_logs` | Regex | Seconds (optional ms) | Dynamic tag support + Lua enhancement |
 
-**Why this order?** MOV.AI logs get specialized parsing first, then fall through to generic parsers. Other services skip directly to generic parsing, reducing CPU overhead by ~30-40%.
+**Key Design Decisions:**
+
+1. **Flexible Milliseconds**: All regex parsers accept timestamps with or without milliseconds for backward compatibility and real-world logger variance
+2. **Time Format**: Base format `%Y-%m-%d %H:%M:%S` handles all cases correctly
+3. **Unified Field Names**: All structured parsers extract consistent field names (`level`, `timestamp`, `module`, `funcName`, `lineno`, `message`)
+4. **Type Safety**: Lua filter includes type validation (`type(log_field) == "string"`) to prevent runtime errors
+5. **Performance Optimization**: Lua operations are conditional (ANSI stripping only if ESC char present)
+
+**Lua Filter Post-Processing** (`files/parse_callback_tags.lua`):
+- Extracts `ui` field: True/False, case-sensitive, exact match only
+- Extracts `node` field: Any string value, whitespace-trimmed
+- Sets `has_ui`, `has_node` boolean flags
+- Strips ANSI codes with pattern `\27%[[0-9;]*[mGKHJABCDEFPsu]` (covers 99% of use cases)
+- Non-destructive: preserves all original fields, only enhances records
 
 ### Log Formats
 
-The Log Agent supports multiple structured log formats:
+The Log Agent supports multiple structured log formats with **second-level timestamp precision** (no milliseconds required).
+
+> **⚠️ Timestamp Precision**: All parsers accept timestamps WITHOUT milliseconds. Optional milliseconds (if present) are supported but not required. Time format: `YYYY-MM-DD HH:MM:SS`
 
 #### 1. Callback Logs (with dynamic tags)
 ```
@@ -108,21 +125,22 @@ The Log Agent supports multiple structured log formats:
 
 **Example:**
 ```
-[CRITICAL][2026-03-04 16:19:17][stress_logs_movai][test_callback][48]: [ui:True|node:robot_01] Callback logger critical for iteration=22
-[INFO][2026-03-04 12:34:56][mymodule][my_function][42]: [ui:False] Standard callback message
+[CRITICAL][2026-03-09 17:57:39][stress_logs_movai][test_callback][48]: [ui:True|node:robot_01] Callback logger critical for iteration=22
+[INFO][2026-03-09 17:57:39][mymodule][my_function][42]: [ui:False] Standard callback message
 ```
 
-**Parsed Fields (with Lua extraction):**
+**Parsed Fields (with Lua post-processing):**
 - `level`: Log level (INFO, WARNING, ERROR, CRITICAL, etc.)
-- `timestamp`: Log timestamp
+- `timestamp`: Log timestamp (YYYY-MM-DD HH:MM:SS format)
 - `module`: Module name
 - `funcName`: Function name
 - `lineno`: Line number
 - `tags`: Raw tags string (original format: `tag1:value1|tag2:value2`)
-- `ui`: Extracted ui tag value (`True` or `False` only, nil if not present)
-- `node`: Extracted node tag value (any string, nil if not present)
-- `has_ui`: Boolean flag if ui tag exists with valid value
-- `has_node`: Boolean flag if node tag exists
+- `ui`: Extracted ui tag value (`True` or `False` only, nil if not present) - **via Lua filter**
+- `node`: Extracted node tag value (trimmed string, nil if not present) - **via Lua filter**
+- `has_ui`: Boolean flag if ui tag exists with valid value - **via Lua filter**
+- `has_node`: Boolean flag if node tag exists - **via Lua filter**
+- `log`: Original log field with ANSI escape sequences stripped - **via Lua filter**
 - `message`: Log message content
 
 #### 2. Application Logs (MOV.AI format)
@@ -138,42 +156,54 @@ Supports both with and without user_log field in single parser.
 [LEVEL][YYYY-MM-DD HH:MM:SS][module][function][lineno]: MESSAGE
 ```
 
-**Example:**
+**Examples:**
 ```
-[INFO][2026-03-03 10:30:45][my_module][my_function][123]: [user_log:system] Application started successfully
-[WARNING][2026-03-03 23:30:41][spawner][<module>][74]: Robot default-robot warning signal
+[INFO][2026-03-09 17:57:39][my_module][my_function][123]: [user_log:system] Application started successfully
+[WARNING][2026-03-09 17:57:40][spawner][<module>][74]: Robot default-robot warning signal
+[ERROR][2026-03-09 17:57:41][core][initialize][45]: Fatal initialization error
 ```
 
 **Parsed Fields:**
 - `level`: Log level (INFO, WARNING, ERROR, DEBUG, etc.)
-- `timestamp`: Log timestamp
+- `timestamp`: Log timestamp (YYYY-MM-DD HH:MM:SS format)
 - `module`: Module name
 - `funcName`: Function name
 - `lineno`: Line number
-- `user_log`: User-defined log category (optional, empty if not present)
+- `user_log`: User-defined log category (optional, empty string if not present)
 - `message`: Log message content
 
 #### 3. Python Structured Logs
 ```
-[levelname][asctime][module][funcName][tags][lineno]: message
+[LEVEL][YYYY-MM-DD HH:MM:SS][module][funcName][tags][lineno]: message
 ```
 
-**Example:**
+Supports both comma and dot separators for optional milliseconds.
+
+**Examples:**
 ```
-[INFO][2026-03-04 12:34:56,123][mymodule][my_function][device:test][42]: Something happened
+[INFO][2026-03-09 17:57:39][mymodule][my_function][device:test][42]: Something happened
+[DEBUG][2026-03-09 17:57:40,123][core][startup][config:prod][18]: Initialization with config
 ```
 
 **Parsed Fields:**
-- `levelname`: Log level
-- `asctime`: Timestamp with milliseconds
+- `level`: Log level (INFO, DEBUG, WARNING, ERROR, etc.)
+- `timestamp`: Log timestamp (YYYY-MM-DD HH:MM:SS format, optional milliseconds ignored)
 - `module`: Module name
 - `funcName`: Function name
-- `tags`: Tag field (device:test format)
+- `tags`: Tag field (structured as `key:value` pairs)
 - `lineno`: Line number
 - `message`: Log message content
 
 #### 4. Docker (JSON format)
 Generic JSON logs from Docker containers.
+
+#### Stage 3: Generic Fallback Parsing
+Applied to **all** logs (both `movai.logs` and `docker.*`):
+
+- `app_logs`: Parse standard MOV.AI application format
+- `docker`: Parse generic JSON Docker logs
+
+**Why this order?** MOV.AI logs get specialized parsing first, then fall through to generic parsers. Other services skip directly to generic parsing, reducing CPU overhead by ~30-40%.
 
 ### Processing Optimizations
 
@@ -190,9 +220,10 @@ The multi-stage pipeline design provides significant performance benefits:
 - ~30-40% CPU reduction for non-MOV.AI containers (redis, grafana, loki, etc.)
 
 **ANSI Code Stripping:**
-- Lua filter runs BEFORE parsers to ensure clean data
-- Only checks for ANSI if escape character (`\27`) present in log field
-- Single-pass regex removes all common ANSI sequences
+- Lua filter runs AFTER parsers to enhance records
+- Only checks for ANSI if escape character (`\27`) present in log field (performance optimization)
+- Single-pass regex removes all common ANSI sequences (colors, cursor movement, graphics rendition)
+- Type-safe: validates log field is string before processing
 - Applied only to `movai.logs` tag, skipping non-MOV.AI services
 
 **Parser Efficiency:**
@@ -364,19 +395,19 @@ The test scripts validate:
 
 - **Callback format** (`stress_logs_movai.py` with ui/node tags):
   ```
-  [CRITICAL][2026-03-04 16:19:17][module][function][lineno]: [ui:True|node:robot_01] MESSAGE
+  [CRITICAL][2026-03-09 17:57:39][module][function][lineno]: [ui:True|node:robot_01] MESSAGE
   ```
   Tests callback_logs parser with tag extraction via Lua filter
 
 - **MOV.AI format** (`stress_logs_movai.py` standard):
   ```
-  [INFO][YYYY-MM-DD HH:MM:SS][module][function][lineno]: [user_log:VALUE] MESSAGE
+  [INFO][2026-03-09 17:57:39][module][function][lineno]: [user_log:VALUE] MESSAGE
   ```
   Tests app_logs parser with user_log field extraction
 
 - **Standard format** (`stress_logs.py`):
   ```
-  YYYY-MM-DD HH:MM:SS | LEVEL | APP_NAME | MESSAGE
+  2026-03-09 17:57:39 | INFO | APP_NAME | MESSAGE
   ```
   Tests generic JSON parsing via docker parser
 
