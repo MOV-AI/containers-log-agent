@@ -83,8 +83,8 @@ pipeline:
       rename:
         - levelname level
 
-    # STAGE 3: Generic parsers for all services (fallback)
-    # Applied to both MOV.AI logs (after structured parsing) and other services
+    # STAGE 3: Generic parsers (fallback) for all logs
+    # Applied  only to other services
     - name: parser
       match: docker.*
       key_name: log
