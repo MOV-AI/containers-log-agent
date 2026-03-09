@@ -54,7 +54,7 @@ pipeline:
       emitter_name: re_emitted
 
     # STAGE 2: MOV.AI Structured Log Processing (backend & spawner only)
-    # Pre-processing: Strip ANSI color codes and extract callback tags
+    # Pre-processing: Strip ANSI color codes, extract callback tags, and normalize timestamps
     # MUST run BEFORE parsers to ensure clean data for pattern matching
     - name: lua
       match: movai.logs
@@ -107,8 +107,14 @@ pipeline:
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
+      # label_keys specifies which fields from the log record should be included as labels in Loki
+      # This allows for efficient querying and filtering based on these fields.
+      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
       label_keys: $container_name,$service,$robot,$user_log,$ui,$has_ui,$has_node,$level
-      remove_keys: container_id
+      # remove_keys specifies which fields should be removed from the log record before sending to Loki
+      # This is useful for excluding fields that are not needed in Loki
+      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
+      remove_keys: container_id,lineno,module,funcName
       line_format: key_value
       compress: snappy
       workers: 2
