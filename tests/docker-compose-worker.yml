@@ -66,7 +66,7 @@ services:
       <<: *movai-common-env
       APT_INSTALL_LIST:
     logging: *movai-common-logging
-    labels: { service: redis-master, robot: manager-test }
+    labels: { service: redis-slave, robot: worker-test }
 
   redis-local:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
@@ -88,7 +88,7 @@ services:
       <<: *movai-common-env
       APT_INSTALL_LIST:
     logging: *movai-common-logging
-    labels: { service: redis-local, robot: manager-test }
+    labels: { service: redis-local, robot: worker-test }
 
 
   spawner:
@@ -126,7 +126,7 @@ services:
       APP_NAME: spawner
       APT_INSTALL_LIST: $FLOW_INITIATOR_SPAWNER_PACKAGES
     logging: *movai-common-logging
-    labels: { service: spawner, robot: manager-test }
+    labels: { service: spawner, robot: worker-test }
 
   influxdb:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/influxdb:v1.2.1
@@ -147,7 +147,7 @@ services:
       - TZDATA=/usr/share/zoneinfo
     restart: always
     logging: *movai-common-logging
-    labels: { service: influxdb, robot: manager-test }
+    labels: { service: influxdb, robot: worker-test }
 
   telegraf:
     image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/telegraf:v1.3.2
@@ -189,7 +189,7 @@ services:
       - HOST_RUN=/hostfs/run
       - HOST_MOUNT_PREFIX=/hostfs
     logging: *movai-common-logging
-    labels: { service: telegraf, robot: manager-test }
+    labels: { service: telegraf, robot: worker-test }
 
   fluent-bit:
     build:
@@ -223,7 +223,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    labels: { service: fluent-bit, robot: manager-test }
+    labels: { service: fluent-bit, robot: worker-test }
 
 volumes:
   influxdb-data-worker-test:
