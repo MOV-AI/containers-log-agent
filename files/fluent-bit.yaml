@@ -6,7 +6,7 @@ env:
   # LOKI_PORT: 3100
   # DEVICE_NAME: default-device
   # APP_NAME: default-app
-  FLUSH_INTERVAL: 1
+  FLUSH_INTERVAL: 5
 service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
@@ -15,36 +15,147 @@ service:
   http_listen: 0.0.0.0
   http_port: 2020
   parsers_file: /fluent-bit/etc/parsers.conf
-
-# Storage configuration for reliability
-storage:
-  path: /var/log/flb-storage/
-  sync: normal
-  checksum: off
-  max_chunks_up: 128
-  backlog_mem_limit: ${FLUENT_BIT_BACKLOG_MEM_LIMIT:10M}
-  total_limit_size: ${FLUENT_BIT_TOTAL_LIMIT_SIZE:500M}
+  storage.path: /var/log/flb-storage/
+  storage.sync: normal
+  storage.checksum: off
+  storage.max_chunks_up: 128
+  storage.backlog.mem_limit: ${FLUENT_BIT_BACKLOG_MEM_LIMIT:10M}
+  storage.total_limit_size: ${FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE:500M}
+  storage.metrics: on
 
 # Forward Input - Receives logs from other Fluent Bit instances or applications
 pipeline:
   inputs:
+    # Logs input - accepts logs via TCP socket
     - name: forward
       listen: 0.0.0.0
       port: 24224
       buffer_chunk_size: 1M
       buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE:6M}
+      storage.type: filesystem # Use filesystem storage for reliability
+
+    # Metrics input - accepts metrics via TCP socket
+    - name: forward
+      listen: 0.0.0.0
+      port: 24225
+      tag: metrics.*
+      buffer_chunk_size: 1M
+      buffer_max_size: 6M
+      storage.type: filesystem # Use filesystem storage for reliability
+
+  filters:
+    # STAGE 1: Identify MOV.AI services for structured log parsing
+    # Re-tag backend/spawner logs to 'movai.logs' for MOV.AI-specific parsing pipeline
+    # Other services keep 'docker.*' tag and go through generic parsing only
+    - name: rewrite_tag
+      match: docker.*
+      rule:
+        - "$service ^(backend|spawner)$ movai.logs false"
+      emitter_name: re_emitted
+
+    # STAGE 2: MOV.AI Structured Log Processing (backend & spawner only)
+    # Pre-processing: Strip ANSI color codes, extract callback tags, and normalize timestamps
+    # MUST run BEFORE parsers to ensure clean data for pattern matching
+    - name: lua
+      match: movai.logs
+      script: /fluent-bit/etc/parse_callback_tags.lua
+      call: parse_callback_tags
+
+    # Parse MOV.AI callback format with dynamic tags (ui, node, etc.)
+    - name: parser
+      match: movai.logs
+      key_name: log
+      parser: callback_logs
+      preserve_key: true
+      reserve_data: true
+
+    # Parse MOV.AI Python structured logs
+    - name: parser
+      match: movai.logs
+      key_name: log
+      parser: python_structured
+      preserve_key: true
+      reserve_data: true
+
+    # Normalize Python log level field for Loki labeling
+    - name: modify
+      match: movai.logs
+      rename:
+        - levelname level
+
+    # STAGE 3: Generic parsers (fallback) for all logs
+    # Applied  only to other services
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: app_logs
+      preserve_key: true
+      reserve_data: true
+
+    - name: parser
+      match: docker.*
+      key_name: log
+      parser: docker
+      preserve_key: true
+      reserve_data: true
 
   outputs:
+    # Logs output to Loki
     - name: loki
-      match: docker.*
+      match: "*"
       log_level: ${LOG_LEVEL}
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=docker
-      label_keys: $container_name,$service,$robot
-      remove_keys: container_id
+      # label_keys specifies which fields from the log record should be included as labels in Loki
+      # This allows for efficient querying and filtering based on these fields.
+      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
+      label_keys: $container_name,$service,$robot,$user_log,$ui,$has_ui,$has_node,$level
+      # remove_keys specifies which fields should be removed from the log record before sending to Loki
+      # This is useful for excluding fields that are not needed in Loki
+      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
+      remove_keys: container_id,lineno,module,funcName
       line_format: key_value
       compress: snappy
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+
+    # # Logs output to InfluxDB (optional)
+    # - name: influxdb
+    #   match: docker.*
+    #   storage.total_limit_size: ${FLUENT_BIT_INFLUXDB_TOTAL_LIMIT_SIZE:500M}
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: app_logs
+    #   tag_keys: level,user_log,service,robot
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:
+
+    # # Metrics output to InfluxDB
+    # - name: influxdb
+    #   match: metrics.*
+    #   storage.total_limit_size: ${FLUENT_BIT_INFLUXDB_TOTAL_LIMIT_SIZE:500M}
+    #   host: ${INFLUXDB_HOST:localhost}
+    #   port: ${INFLUXDB_PORT:8086}
+    #   http_user: ${INFLUXDB_USER:}
+    #   http_passwd: ${INFLUXDB_PASSWD:}
+    #   database: metrics
+    #   auto_tags: true
+    #   workers: 2
+    #   bucket:
+    #   org:
+    #   sequence_tag:
+    #   uri:
+    #   http_token:
+    #   http_header:
+    #   add_integer_suffix:

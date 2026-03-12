@@ -1,0 +1,378 @@
+# WARNING:
+#   This configuration is for local development. Do not use it in a production deployment.
+#
+# Purpose: Full integration test environment for Fluent Bit log agent on manager node
+# Services: Fluent Bit, Loki, Grafana, Redis, Backend, Spawner, InfluxDB, Telegraf
+# Logging: Docker fluentd driver forwards logs to Fluent Bit on 200.168.1.254:24224
+# Parsing: MOV.AI structured format (backend, spawner) + generic JSON (redis)
+# Visualization: Grafana @ http://200.168.1.254:3000 (admin/admin)
+#
+# Quick start:
+#   docker compose up -d
+#   docker exec spawner-manager-test python3 /opt/mov.ai/scripts/stress_logs_movai.py
+#   Open http://200.168.1.254:3000 → Explore → Loki
+#
+# Feel free to modify this file to suit your needs.
+---
+name: manager-test
+
+x-movai-common:
+  &movai-common
+  environment:
+    &movai-common-env
+    MOVAI_ENV: ${MOVAI_ENV:-qa}
+    LOGLEVEL: WARNING
+    MOVAI_USERSPACE: /opt/mov.ai/user
+    MOVAI_MANAGER_URI: https://manager.dummy.local
+    MOVAI_DEVICE_NAME: manager-test
+    FLEET_NAME: loki-test
+    FLEET_TOKEN: flow-initiator-test
+    REDIS_LOCAL_PORT: 6379
+    REDIS_LOCAL_HOST: redis-local
+    REDIS_MASTER_PORT: 6379
+    REDIS_MASTER_HOST: redis-master
+    ROS_MASTER_URI: http://ros-master:11311/
+    PUBLIC_IP: manager.dummy.local
+    LOG_HTTP_HOST:
+    APT_AUTOINSTALL: "once"
+    APT_KEYS_URL_LIST: "https://artifacts.cloud.mov.ai/repository/movai-applications/gpg"
+    APT_REPOS_LIST: "deb [arch=all] https://artifacts.cloud.mov.ai/repository/ppa-testing testing main"
+  logging: &movai-common-logging
+    driver: fluentd
+    options:
+      fluentd-address: 200.168.1.254:24224
+      tag: "docker.{{.Name}}"
+      labels: "service,robot"
+      env: "MOVAI_ENV"
+
+services:
+  redis-master:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
+    container_name: redis-master-manager-test
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "echo", ">", "/dev/tcp/localhost/6379"]
+      start_period: 3s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    ports:
+      - 200.168.1.254:6379:6379
+    volumes:
+      - redis-master-manager-test:/data
+    environment:
+      <<: *movai-common-env
+      APT_INSTALL_LIST:
+    logging: *movai-common-logging
+    labels: { service: redis-master, robot: manager-test }
+
+  redis-local:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/redis2:v2.1.0
+    container_name: redis-local-manager-test
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "echo", ">", "/dev/tcp/localhost/6380"]
+      start_period: 3s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    volumes:
+      - redis-local-manager-test:/data
+    environment:
+      <<: *movai-common-env
+      APT_INSTALL_LIST:
+    logging: *movai-common-logging
+    labels: { service: redis-local, robot: manager-test }
+  backend:
+    <<: *movai-common
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/qa/backend-noetic:3.27.0.2
+    container_name: backend-manager-test
+    networks:
+      - private
+    depends_on:
+      redis-local:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    environment:
+      <<: *movai-common-env
+      APT_INSTALL_LIST: "movai-launcher=2.7.21-1,movai-adminboard=2.7.21-1,movai-fleetmanager=2.7.21-1,movai-ide=2.7.21-1,movai-taskmanager=2.7.21-1"
+      MOVAI_STDOUT_VERBOSITY_LEVEL: DEBUG
+      MOVAI_HEALTHNODE_VERBOSITY_LEVEL: DEBUG
+      MOVAI_LOGFILE_VERBOSITY_LEVEL: DEBUG
+      MOVAI_GENERAL_VERBOSITY_LEVEL: DEBUG
+      HTTP_PORT: 5004
+      DEFAULT_USERNAME: default
+      DEFAULT_PASSWORD: test@1234
+      MOVAI_USERNAME: movai
+      MOVAI_PASSWORD: test@1234
+      JWT_SECRET_KEY: 'some_random_string'
+    ports:
+      - 8084:5004
+    healthcheck:
+      test: ["CMD", "echo", ">", "/dev/tcp/localhost/5004"]
+      start_period: 5s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    logging: *movai-common-logging
+    labels: { service: backend, robot: manager-test }
+
+  spawner:
+    <<: *movai-common
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/qa/flow-initiator-noetic:4.13.7.1
+    privileged: true
+    networks:
+      - private
+    depends_on:
+      redis-local:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    container_name: spawner-manager-test
+    healthcheck:
+      test: ["CMD", "pidof", "tail"]
+      start_period: 15s
+      interval: 10s
+      timeout: 2s
+      retries: 3
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "tail -f /dev/null"]
+    volumes:
+      - /dev:/dev
+      - /sys/devices:/sys/devices
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+      - /run/movai:/var/run/movai
+      - ./manager_userspace:/opt/mov.ai/user
+      - ./manager_shared:/opt/mov.ai/shared
+      - ./manager_logs:/opt/mov.ai/logs
+      - ./scripts:/opt/mov.ai/scripts
+    environment:
+      <<: *movai-common-env
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      APP_NAME: spawner
+      APT_INSTALL_LIST: $FLOW_INITIATOR_SPAWNER_PACKAGES
+    logging: *movai-common-logging
+    labels: { service: spawner, robot: manager-test }
+
+  influxdb:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/influxdb:v1.2.1
+    container_name: influxdb-manager-test
+    ports:
+      - "200.168.1.254:8086:8086"
+    volumes:
+      - influxdb:/var/lib/influxdb
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "pidof", "influxd"]
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+    hostname: influxdb
+    environment:
+      - TZ=Europe/Lisbon
+      - TZDATA_TZ=Europe/Lisbon
+      - TZDATA=/usr/share/zoneinfo
+    restart: always
+    logging: *movai-common-logging
+    labels: { service: influxdb, robot: manager-test }
+
+  monitoring:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/monitoring:v1.0.2
+    ports:
+      - "200.168.1.254:8888:8888"
+    networks:
+      - private
+    hostname: monitoring
+    volumes:
+      - monitoring-chronograf:/var/lib/chronograf
+      - monitoring-kapacitor:/var/lib/kapacitor
+    restart: always
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    environment:
+      - TZ=Europe/Lisbon
+      - TZDATA_TZ=Europe/Lisbon
+      - TZDATA=/usr/share/zoneinfo
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_USERNAME=telegraf
+      - INFLUXDB_PASSWORD=telegraf
+      - KAPACITOR_SLACK_URL=
+      - KAPACITOR_SLACK_CHANNEL=
+      - KAPACITOR_SLACK_WORKSPACE=
+      - KAPACITOR_SLACK_ENABLED=true
+    logging: *movai-common-logging
+    labels: { service: monitoring, robot: manager-test }
+
+  telegraf:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/telegraf:v1.3.2
+    container_name: telegraf-manager-test
+    hostname: telegraf
+    networks:
+      - private
+    volumes:
+      - "/etc:/hostfs/etc:ro"
+      - "/sys:/hostfs/sys:ro"
+      - "/var:/hostfs/var:ro"
+      - "/run:/hostfs/run:ro"
+      - "/proc:/hostfs/proc:ro"
+      - "/run/udev:/run/udev:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:rw"
+    # telegraf does not run as root
+    # get access to docker socket for telegraf user on host and on container
+    # to be able to collect docker stats
+    user: "telegraf:${TELEGRAF_GID}"
+    privileged: true
+    security_opt:
+      - apparmor:unconfined
+    restart: always
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    environment:
+      - TZ=Europe/Lisbon
+      - TZDATA_TZ=Europe/Lisbon
+      - TZDATA=/usr/share/zoneinfo
+      - TELEGRAF_HOSTNAME=telegraf
+      - TELEGRAF_CONFIG_LEVEL=production
+      - HOST_ETC=/hostfs/etc
+      - HOST_PROC=/hostfs/proc
+      - HOST_SYS=/hostfs/sys
+      - HOST_VAR=/hostfs/var
+      - HOST_RUN=/hostfs/run
+      - HOST_MOUNT_PREFIX=/hostfs
+    logging: *movai-common-logging
+    labels: { service: telegraf, robot: manager-test }
+
+  loki:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/log-aggregator:1.0.5
+    container_name: loki-manager-test
+    hostname: loki
+    networks:
+      - private
+    volumes:
+      - loki-data:/loki
+    ports:
+      - "200.168.1.254:3100:3100"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-version"]
+      start_period: 5s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      fluent-bit:
+        condition: service_healthy
+      redis-local:
+        condition: service_healthy
+    logging: *movai-common-logging
+    labels: { service: loki, robot: manager-test }
+
+  fluent-bit:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    container_name: fluent-bit-manager-test
+    hostname: fluent-bit
+    networks:
+      - private
+    ports:
+      - "200.168.1.254:24224:24224"
+    volumes:
+      - fluent-bit-storage-manager-test:/var/log/flb-storage/
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "/bin/busybox", "pidof", "fluent-bit"]
+      start_period: 1s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels: { service: fluent-bit, robot: manager-test }
+
+  grafana:
+    image: ${MOVAI_REGISTRY:-registry.cloud.mov.ai}/ce/obs-dashboard:1.0.2
+    container_name: grafana-manager-test
+    ports:
+      - "200.168.1.254:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+      fluent-bit:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      start_period: 5s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *movai-common-logging
+    labels: { service: grafana, robot: manager-test }
+
+volumes:
+  grafana-data:
+  loki-data:
+  influxdb-data:
+  fluent-bit-storage-manager-test:
+  redis-master-manager-test:
+  redis-local-manager-test:
+  influxdb:
+  monitoring-chronograf:
+  monitoring-kapacitor:
+
+networks:
+  private:
+    name: manager-test-private
