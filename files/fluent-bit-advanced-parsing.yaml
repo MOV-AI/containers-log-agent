@@ -1,6 +1,11 @@
-# Fluent Bit Configuration - Generic (No Advanced Parsing)
-# Low CPU mode: uses only generic parsers for all logs
-# Service routing and structured parsing disabled
+# Fluent Bit Configuration - Advanced (MOV.AI Structured Parsing)
+# Full-featured mode: service routing + structured parsers + Lua post-processing
+#
+# Processing Pipeline:
+#   1. Service routing: separate backend/spawner from generic services
+#   2. Lua post-processing: ANSI stripping + tag extraction
+#   3. Structured parsers: MOV.AI callback_logs + python_structured formats
+#   4. Generic fallback: app_logs + docker for other services
 #
 # Feature flags (controlled via environment variables):
 #   ENABLE_COMPRESSION: snappy or off (default: snappy)
@@ -52,17 +57,56 @@ pipeline:
       storage.type: filesystem # Use filesystem storage for reliability
 
   filters:
-    # STAGE 1: Generic parsers (fallback) for all logs
-    # Applied to all services - simple and efficient
+    # STAGE 1: Identify MOV.AI services for structured log parsing
+    # Re-tag backend/spawner logs to 'movai.logs' for MOV.AI-specific parsing pipeline
+    # Other services keep 'docker.*' tag and go through generic parsing only
+    - name: rewrite_tag
+      match: docker.*
+      rule:
+        - "$service ^(backend|spawner)$ movai.logs false"
+      emitter_name: re_emitted
+
+    # STAGE 2: MOV.AI Structured Log Processing (backend & spawner only)
+    # Pre-processing: Strip ANSI color codes, extract callback tags, and normalize timestamps
+    # MUST run BEFORE parsers to ensure clean data for pattern matching
+    - name: lua
+      match: movai.logs
+      script: /fluent-bit/etc/parse_callback_tags.lua
+      call: parse_callback_tags
+
+    # Parse MOV.AI callback format with dynamic tags (ui, node, etc.)
     - name: parser
-      match: "*"
+      match: movai.logs
+      key_name: log
+      parser: callback_logs
+      preserve_key: true
+      reserve_data: true
+
+    # Parse MOV.AI Python structured logs
+    - name: parser
+      match: movai.logs
+      key_name: log
+      parser: python_structured
+      preserve_key: true
+      reserve_data: true
+
+    # Normalize Python log level field for Loki labeling
+    - name: modify
+      match: movai.logs
+      rename:
+        - levelname level
+
+    # STAGE 3: Generic parsers (fallback) for all logs
+    # Applied to other services
+    - name: parser
+      match: docker.*
       key_name: log
       parser: app_logs
       preserve_key: true
       reserve_data: true
 
     - name: parser
-      match: "*"
+      match: docker.*
       key_name: log
       parser: docker
       preserve_key: true
@@ -79,7 +123,7 @@ pipeline:
       # label_keys specifies which fields from the log record should be included as labels in Loki
       # This allows for efficient querying and filtering based on these fields.
       # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
-      label_keys: $container_name,$service,$robot,$user_log,$level
+      label_keys: $container_name,$service,$robot,$user_log,$ui,$has_ui,$has_node,$level
       # remove_keys specifies which fields should be removed from the log record before sending to Loki
       # This is useful for excluding fields that are not needed in Loki
       # Note: it improves performance and reduces storage costs by not sending unnecessary data.
