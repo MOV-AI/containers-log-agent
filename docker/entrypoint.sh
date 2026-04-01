@@ -67,4 +67,4 @@ export ENABLE_ADVANCED_PARSING
 
 echo ""
 echo "Starting Fluent Bit with config: $CONFIG_FILE"
-exec /fluent-bit/bin/fluent-bit -c "$CONFIG_FILE"
+exec /fluent-bit/bin/fluent-bit -c "$CONFIG_FILE" "$@"

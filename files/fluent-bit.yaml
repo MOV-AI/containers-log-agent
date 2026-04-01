@@ -55,14 +55,14 @@ pipeline:
     # STAGE 1: Generic parsers (fallback) for all logs
     # Applied to all services - simple and efficient
     - name: parser
-      match: "*"
+      match: docker.*
       key_name: log
       parser: app_logs
       preserve_key: true
       reserve_data: true
 
     - name: parser
-      match: "*"
+      match: docker.*
       key_name: log
       parser: docker
       preserve_key: true
