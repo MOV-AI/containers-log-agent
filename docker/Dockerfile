@@ -15,13 +15,18 @@ LABEL description="MOV.AI Log Agent - Fluent Bit based log collector and forward
       org.opencontainers.image.vendor="MOV.AI" \
       org.opencontainers.image.title="MOV.AI Log Agent"
 
-# Configuration Files: YAML Format
-# - fluent-bit.yaml: Common Fluent Bit settings (e.g., service, parsers, filters)
+# Configuration Files
+# - fluent-bit.yaml: Generic parsing configuration
+# - fluent-bit-advanced-parsing.yaml: Full-featured with service routing and Lua
 # - parsers.conf: Log parsing rules for different log formats
-# - extract_container.lua: Lua script for Docker container metadata extraction
-COPY files/*.yaml /fluent-bit/etc/
+# - parse_callback_tags.lua: Lua script for tag extraction and ANSI stripping
+COPY files/fluent-bit.yaml /fluent-bit/etc/
+COPY files/fluent-bit-*.yaml /fluent-bit/etc/
 COPY files/*.conf /fluent-bit/etc/
 COPY files/*.lua /fluent-bit/etc/
+
+# Entrypoint script for feature flag selection
+COPY docker/entrypoint.sh /
 
 # Environment Variables
 ENV LOG_LEVEL=info
@@ -30,6 +35,12 @@ ENV APP_NAME=default
 ENV LOKI_HOST=loki
 ENV LOKI_PORT=3100
 
+# Feature Flags
+ENV ENABLE_ADVANCED_PARSING=false
+ENV ENABLE_COMPRESSION=true
+ENV ENABLE_STORAGE_METRICS=false
+ENV ENABLE_HTTP_METRICS=false
+
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["/bin/busybox", "pidof", "fluent-bit"]
 
-CMD ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.yaml"]
+ENTRYPOINT ["/entrypoint.sh"]
