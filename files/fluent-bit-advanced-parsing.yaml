@@ -24,7 +24,7 @@ service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
   log_level: ${LOG_LEVEL}
-  http_server: ${ENABLE_HTTP_METRICS:false}
+  http_server: ${ENABLE_HTTP_METRICS}
   http_listen: 0.0.0.0
   http_port: 2020
   parsers_file: /fluent-bit/etc/parsers.conf
@@ -32,9 +32,9 @@ service:
   storage.sync: normal
   storage.checksum: off
   storage.max_chunks_up: 128
-  storage.backlog.mem_limit: ${FLUENT_BIT_BACKLOG_MEM_LIMIT:10M}
-  storage.total_limit_size: ${FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE:500M}
-  storage.metrics: ${ENABLE_STORAGE_METRICS:off}
+  storage.backlog.mem_limit: ${FLUENT_BIT_BACKLOG_MEM_LIMIT}
+  storage.total_limit_size: ${FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE}
+  storage.metrics: ${ENABLE_STORAGE_METRICS}
 
 # Forward Input - Receives logs from other Fluent Bit instances or applications
 pipeline:
@@ -44,7 +44,7 @@ pipeline:
       listen: 0.0.0.0
       port: 24224
       buffer_chunk_size: 1M
-      buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE:6M}
+      buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE}
       storage.type: filesystem # Use filesystem storage for reliability
 
     # Metrics input - accepts metrics via TCP socket
@@ -55,6 +55,8 @@ pipeline:
       buffer_chunk_size: 1M
       buffer_max_size: 6M
       storage.type: filesystem # Use filesystem storage for reliability
+
+    #__SECURITY_INPUTS__
 
   filters:
     # STAGE 1: Identify MOV.AI services for structured log parsing
@@ -112,10 +114,32 @@ pipeline:
       preserve_key: true
       reserve_data: true
 
+    #__SECURITY_FILTERS__
+
   outputs:
     # Logs output to Loki
     - name: loki
-      match: "*"
+      match: docker.*
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=docker
+      # label_keys specifies which fields from the log record should be included as labels in Loki
+      # This allows for efficient querying and filtering based on these fields.
+      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
+      label_keys: $container_name,$service,$robot,$user_log,$level
+      # remove_keys specifies which fields should be removed from the log record before sending to Loki
+      # This is useful for excluding fields that are not needed in Loki
+      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
+      remove_keys: container_id,lineno,module,funcName
+      line_format: key_value
+      compress: ${ENABLE_COMPRESSION}
+      workers: 2
+      retry_limit: false
+      net.dns.mode: TCP
+
+    - name: loki
+      match: movai.logs
       log_level: ${LOG_LEVEL}
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
@@ -129,7 +153,21 @@ pipeline:
       # Note: it improves performance and reduces storage costs by not sending unnecessary data.
       remove_keys: container_id,lineno,module,funcName
       line_format: key_value
-      compress: ${ENABLE_COMPRESSION:snappy}
+      compress: ${ENABLE_COMPRESSION}
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+
+    - name: loki
+      match: metrics.*
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=metrics
+      line_format: key_value
+      compress: ${ENABLE_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+
+    #__SECURITY_OUTPUTS__
