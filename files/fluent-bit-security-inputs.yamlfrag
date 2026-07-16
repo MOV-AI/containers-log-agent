@@ -30,6 +30,19 @@
         - _SYSTEMD_UNIT=systemd-networkd.service
         - _SYSTEMD_UNIT=wpa_supplicant.service
         - _SYSTEMD_UNIT=ModemManager.service
+        - _SYSTEMD_UNIT=systemd-resolved.service
+        - _SYSTEMD_UNIT=ufw.service
+        - _SYSTEMD_UNIT=firewalld.service
+        - _SYSTEMD_UNIT=nftables.service
+
+    # Kernel transport stream captures firewall logs emitted via netfilter/iptables/nftables.
+    - name: systemd
+      tag: host.events.network
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _TRANSPORT=kernel
 
     - name: systemd
       tag: host.events.system

@@ -30,7 +30,7 @@ COPY files/*.lua /fluent-bit/etc/
 COPY docker/entrypoint.sh /
 
 # Environment Variables
-ENV LOG_LEVEL=info
+ENV LOG_LEVEL=warning
 ENV DEVICE_NAME=manager
 ENV APP_NAME=default
 ENV LOKI_HOST=loki
