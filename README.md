@@ -311,7 +311,7 @@ Parsed log fields are exported as Loki labels based on configuration:
 |----------|---------|---------|
 | `LOKI_HOST` | Loki server hostname | `loki` |
 | `LOKI_PORT` | Loki server port | `3100` |
-| `LOG_LEVEL` | Fluent Bit log verbosity | `info` |
+| `LOG_LEVEL` | Fluent Bit log verbosity | `warning` |
 | `DEVICE_NAME` | Device/robot identifier | `manager` |
 | `APP_NAME` | Service name context | `default` |
 | `ENABLE_ADVANCED_PARSING` | Enable MOV.AI structured routing/parsers | `false` |

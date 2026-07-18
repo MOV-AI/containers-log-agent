@@ -4,7 +4,7 @@
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=host,event_domain=host
-      label_keys: $event_category,$unit,$service,$robot,$level
+      label_keys: $event_category,$unit,$service,$robot
       remove_keys: container_id,lineno,module,funcName
       line_format: key_value
       compress: ${ENABLE_COMPRESSION}

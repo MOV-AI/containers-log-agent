@@ -47,6 +47,11 @@
         - event_domain host
         - robot ${FLUENT_BIT_HOSTNAME}
 
+    - name: record_modifier
+      match: host.events.*
+      record:
+        - service host
+
     - name: modify
       match: host.events.*
       rename:
