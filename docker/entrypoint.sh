@@ -119,15 +119,12 @@ if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
     has_auth_log="false"
 
     [ -d "/hostfs/var/log/journal" ] && has_persistent_journal="true"
-    [ -d "/hostfs/run/log/journal" ] && has_runtime_journal="true"
-    [ -f "/hostfs/var/log/audit/audit.log" ] && has_audit_log="true"
-    [ -f "/hostfs/var/log/auth.log" ] && has_auth_log="true"
-    [ -f "/hostfs/var/log/secure" ] && has_auth_log="true"
+    # NOTE: Fluent Bit systemd inputs currently read from /hostfs/var/log/journal only.
 
-    if [ "$has_persistent_journal" = "true" ] || [ "$has_runtime_journal" = "true" ]; then
-        echo "✓ Security source available: journald"
+    if [ "$has_persistent_journal" = "true" ]; then
+        echo "✓ Security source available: journald (/hostfs/var/log/journal)"
     else
-        echo "⚠ Security source unavailable: journald paths not mounted/readable"
+        echo "⚠ Security source unavailable: /hostfs/var/log/journal"
     fi
 
     if [ "$has_audit_log" = "true" ]; then
