@@ -22,6 +22,7 @@ LABEL description="MOV.AI Log Agent - Fluent Bit based log collector and forward
 # - parse_callback_tags.lua: Lua script for tag extraction and ANSI stripping
 COPY files/fluent-bit.yaml /fluent-bit/etc/
 COPY files/fluent-bit-*.yaml /fluent-bit/etc/
+COPY files/*.yamlfrag /fluent-bit/etc/
 COPY files/*.conf /fluent-bit/etc/
 COPY files/*.lua /fluent-bit/etc/
 
@@ -29,7 +30,7 @@ COPY files/*.lua /fluent-bit/etc/
 COPY docker/entrypoint.sh /
 
 # Environment Variables
-ENV LOG_LEVEL=info
+ENV LOG_LEVEL=warning
 ENV DEVICE_NAME=manager
 ENV APP_NAME=default
 ENV LOKI_HOST=loki
