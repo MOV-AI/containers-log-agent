@@ -1,0 +1,60 @@
+    - name: record_modifier
+      match: host.events.authentication
+      record:
+        - event_category authentication
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.security
+      record:
+        - event_category security
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.software_updates
+      record:
+        - event_category software_updates
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.network
+      record:
+        - event_category network
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.system
+      record:
+        - event_category system
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.power
+      record:
+        - event_category power
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.movai
+      record:
+        - event_category movai
+        - event_domain host
+        - robot ${FLUENT_BIT_HOSTNAME}
+
+    - name: record_modifier
+      match: host.events.*
+      record:
+        - service host
+
+    - name: modify
+      match: host.events.*
+      rename:
+        - _SYSTEMD_UNIT unit
+        - PRIORITY priority
+        - MESSAGE message

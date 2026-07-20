@@ -1,0 +1,91 @@
+    # Host journald sources for domain event collection.
+    - name: systemd
+      tag: host.events.authentication
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=sshd.service
+        - _SYSTEMD_UNIT=systemd-logind.service
+        - _SYSTEMD_UNIT=polkit.service
+
+    - name: systemd
+      tag: host.events.software_updates
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=apt-daily.service
+        - _SYSTEMD_UNIT=apt-daily-upgrade.service
+        - _SYSTEMD_UNIT=unattended-upgrades.service
+        - _SYSTEMD_UNIT=dnf-automatic.service
+
+    - name: systemd
+      tag: host.events.network
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=NetworkManager.service
+        - _SYSTEMD_UNIT=systemd-networkd.service
+        - _SYSTEMD_UNIT=wpa_supplicant.service
+        - _SYSTEMD_UNIT=ModemManager.service
+        - _SYSTEMD_UNIT=systemd-resolved.service
+        - _SYSTEMD_UNIT=ufw.service
+        - _SYSTEMD_UNIT=firewalld.service
+        - _SYSTEMD_UNIT=nftables.service
+
+    # Kernel transport stream captures firewall logs emitted via netfilter/iptables/nftables.
+    - name: systemd
+      tag: host.events.network
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _TRANSPORT=kernel
+
+    - name: systemd
+      tag: host.events.system
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=docker.service
+        - _SYSTEMD_UNIT=containerd.service
+        - _SYSTEMD_UNIT=dbus.service
+        - _SYSTEMD_UNIT=systemd-journald.service
+
+    - name: systemd
+      tag: host.events.power
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=upower.service
+
+    - name: systemd
+      tag: host.events.movai
+      path: /hostfs/var/log/journal
+      read_from_tail: true
+      storage.type: filesystem
+      systemd_filter:
+        - _SYSTEMD_UNIT=movai-service.service
+
+    # Host audit source and auth fallback logs.
+    - name: tail
+      tag: host.events.security
+      path: /hostfs/var/log/audit/audit.log
+      parser: auditd_simple
+      read_from_head: false
+      refresh_interval: 5
+      skip_long_lines: on
+      storage.type: filesystem
+
+    - name: tail
+      tag: host.events.authentication
+      path: /hostfs/var/log/auth.log,/hostfs/var/log/secure
+      parser: host_auth_line
+      read_from_head: false
+      refresh_interval: 5
+      skip_long_lines: on
+      storage.type: filesystem
