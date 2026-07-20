@@ -11,7 +11,9 @@ The Log Agent is a lightweight, efficient logging solution designed for the MOV.
 - **Lightweight**: Built on Fluent Bit for minimal resource footprint
 - **Smart Routing**: Single-tag approach (`movai.logs`) for MOV.AI services structured parsing
 - **Multi-stage Pipeline**: Optimized processing with service-based routing (30-40% CPU reduction)
-- **Multi-role Support**: Templated configurations for manager and worker nodes
+- **Host Security Ingestion (Optional)**: Collects host events (journald, audit, auth fallback) when enabled
+- **Runtime Config Composition**: Builds `/tmp/fluent-bit-runtime.yaml` from base config + optional security fragments
+- **Multi-role Support**: Manager and worker role-aware deployment with existing Loki routing model
 - **Loki Integration**: Direct integration with Grafana Loki for log storage
 - **Buffered Output**: Configurable storage and buffering for reliability
 - **HTTP Metrics**: Built-in HTTP server for monitoring and metrics
@@ -26,6 +28,10 @@ The Log Agent uses environment variable-driven Fluent Bit configuration files:
 - **Input**:
   - Forward protocol listener on port 24224 for logs
   - Forward protocol listener on port 24225 for metrics / notifications / etc ...
+- **Optional Security Input** (feature flag):
+  - journald events from host paths
+  - audit log tail from host
+  - auth/secure file fallback tail from host
 - **Storage**: Local buffer storage at `/var/log/flb-storage/` with 10MB memory limit
 - **Workers**: 2 worker threads for concurrent processing
 - **Compression**: Snappy compression enabled
@@ -33,7 +39,22 @@ The Log Agent uses environment variable-driven Fluent Bit configuration files:
   - **Stage 1**: Service-based routing via `rewrite_tag` filter
   - **Stage 2**: MOV.AI structured parsing (callback_logs, python_structured)
   - **Stage 3**: Generic fallback parsing (app_logs, docker)
+- **Security Categories** (when enabled):
+  - `host.events.authentication`
+  - `host.events.security`
+  - `host.events.software_updates`
+  - `host.events.network`
+  - `host.events.system`
+  - `host.events.power`
+  - `host.events.movai`
 - **Processing**: Lua filter for ANSI color code stripping and tag extraction
+- **Feature Flags**:
+  - `ENABLE_ADVANCED_PARSING`
+  - `SECURITY_LOGS_ENABLE`
+  - `SECURITY_LOGS_STRICT`
+  - `ENABLE_COMPRESSION`
+  - `ENABLE_STORAGE_METRICS`
+  - `ENABLE_HTTP_METRICS`
 
 ### Processing Pipeline
 
@@ -51,12 +72,16 @@ flowchart TD
 
     D --> G
 
-    G --> H[Loki Output<br/>match: *]
+    G --> H[Loki Output<br/>match: docker.*]
+    F --> I[Loki Output<br/>match: movai.logs]
+    J[Forward Metrics<br/>tag: metrics.*] --> K[Loki Output<br/>match: metrics.*]
+    L[Optional Host Security Inputs<br/>tag: host.events.*] --> M[Loki Output<br/>match: host.events.*]
 
     style C fill:#e1f5dd
     style E fill:#fff4e6
     style F fill:#fff4e6
     style G fill:#e3f2fd
+    style L fill:#f3e5f5
 ```
 
 #### Stage 1: Service-Based Routing
@@ -248,12 +273,17 @@ The multi-stage pipeline design provides significant performance benefits:
 
 Parsed log fields are exported as Loki labels based on configuration:
 
-**Standard Labels:**
-- `source`: Always `docker`
-- `container_name`: Container identifier
-- `service`: Service name
-- `robot`: Device/robot identifier
-- `level`: Log level (from parsers)
+**Output Streams:**
+- `docker.*` logs: `labels: source=docker`
+- `movai.logs` logs: `labels: source=docker`
+- `metrics.*` logs: `labels: source=metrics`
+- `host.events.*` logs (when security enabled): `labels: source=host,event_domain=host`
+
+**Standard Labels (docker and movai streams):**
+- `source`, `container_name`, `service`, `robot`, `level`
+
+**Security Labels (host.events stream):**
+- `event_category`, `unit`, `service`, `robot`, `level`
 
 **Extract Labels (when available):**
 - `user_log`: User-defined category from app_logs
@@ -277,13 +307,40 @@ Parsed log fields are exported as Loki labels based on configuration:
 
 ## Environment Variables
 
-| Variable | Purpose | Example | Required |
-|----------|---------|---------|----------|
-| `FLUENT_BIT_CONFIG` | Path to Fluent Bit config | `/fluent-bit/etc/fluent-bit.conf` | No |
-| `LOKI_HOST` | Loki server hostname | `loki-aggregator` | Yes (via config) |
-| `LOKI_PORT` | Loki server port | `3100` | No |
-| `APP_NAME` | Service name for log labeling | `log-agent` | No |
-| `DEVICE_NAME` | Device/robot name for log labeling | `robot-01` | No |
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `LOKI_HOST` | Loki server hostname | `loki` |
+| `LOKI_PORT` | Loki server port | `3100` |
+| `LOG_LEVEL` | Fluent Bit log verbosity | `warning` |
+| `DEVICE_NAME` | Device/robot identifier | `manager` |
+| `APP_NAME` | Service name context | `default` |
+| `ENABLE_ADVANCED_PARSING` | Enable MOV.AI structured routing/parsers | `false` |
+| `SECURITY_LOGS_ENABLE` | Enable host security event ingestion | `false` |
+| `SECURITY_LOGS_STRICT` | Fail startup if security sources/fragments unavailable | `false` |
+| `ENABLE_COMPRESSION` | Enable Loki snappy compression | `true` |
+| `ENABLE_STORAGE_METRICS` | Enable Fluent Bit storage metrics | `false` |
+| `ENABLE_HTTP_METRICS` | Enable Fluent Bit HTTP metrics endpoint | `false` |
+| `FLUSH_INTERVAL` | Service flush interval seconds | `5` |
+| `FLUENT_BIT_BACKLOG_MEM_LIMIT` | Backlog memory limit | `10M` |
+| `FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE` | Total filesystem buffering limit | `500M` |
+| `FLUENT_BIT_BUFFER_MAX_SIZE` | Forward input max buffer size | `6M` |
+| `FLUENT_BIT_HOSTNAME` | Host identity used in host event enrichment | `${DEVICE_NAME}` |
+
+### Runtime Composition
+
+At startup, the entrypoint composes `/tmp/fluent-bit-runtime.yaml`:
+
+1. Select base config:
+  - `files/fluent-bit.yaml` when `ENABLE_ADVANCED_PARSING=false`
+  - `files/fluent-bit-advanced-parsing.yaml` when `ENABLE_ADVANCED_PARSING=true`
+2. If `SECURITY_LOGS_ENABLE=true`, inject these fragments at markers:
+  - `files/fluent-bit-security-inputs.yamlfrag`
+  - `files/fluent-bit-security-filters.yamlfrag`
+  - `files/fluent-bit-security-outputs.yamlfrag`
+3. If security is disabled, strip security markers from base config.
+4. If security is enabled but fragments are missing:
+  - strict true: startup fails
+  - strict false: warning + continue without security injection
 
 
 ## Related Services
