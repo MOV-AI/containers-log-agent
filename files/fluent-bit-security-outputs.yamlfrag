@@ -11,3 +11,12 @@
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8

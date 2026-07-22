@@ -129,6 +129,7 @@ All parsers in `files/parsers.conf` are optimized for production use:
 3. **Unified Field Names**: All structured parsers extract consistent field names (`level`, `timestamp`, `module`, `funcName`, `lineno`, `message`)
 4. **Type Safety**: Lua filter includes type validation (`type(log_field) == "string"`) to prevent runtime errors
 5. **Performance Optimization**: Lua operations are conditional (ANSI stripping only if ESC char present)
+6. **Timestamp Authority**: For structured logs, Fluent Bit keeps ingest/event time as the Loki entry timestamp while preserving parsed `timestamp` as a searchable record field
 
 **Lua Filter Post-Processing** (`files/parse_callback_tags.lua`):
 - Extracts `ui` field: True/False, case-sensitive, exact match only
@@ -483,7 +484,7 @@ Query Loki to verify fields are properly extracted:
 {user_log=~"system|.*"}
 
 # Count logs by level and ui flag across all services
-count by (level, ui) ({service=~"backend|spawner"} | json | has_ui="true")
+count by (level, ui) ({service=~"backend|spawner|orchestrator|ros1-workspace|ros2-workspace"} | json | has_ui="true")
 
 # Find all callback logs with ui:True
 {has_ui="true", ui="True"} | json

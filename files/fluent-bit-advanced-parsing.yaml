@@ -24,6 +24,8 @@ service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
   log_level: ${LOG_LEVEL}
+  scheduler.base: 3
+  scheduler.cap: 30
   http_server: ${ENABLE_HTTP_METRICS}
   http_listen: 0.0.0.0
   http_port: 2020
@@ -69,8 +71,9 @@ pipeline:
       emitter_name: re_emitted
 
     # STAGE 2: MOV.AI Structured Log Processing (movai.logs only)
-    # Pre-processing: Strip ANSI color codes, extract callback tags, and normalize timestamps
-    # MUST run BEFORE parsers to ensure clean data for pattern matching
+    # Pre-processing: Strip ANSI color codes and enrich callback fields.
+    # Tag extraction supports both pre-parsed 'tags' and raw callback 'log' format,
+    # so this Lua stage can run before parser filters without losing ui/node fields.
     - name: lua
       match: movai.logs
       script: /fluent-bit/etc/parse_callback_tags.lua
@@ -137,6 +140,15 @@ pipeline:
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8
 
     - name: loki
       match: movai.logs
@@ -157,6 +169,15 @@ pipeline:
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8
 
     - name: loki
       match: metrics.*
@@ -169,5 +190,14 @@ pipeline:
       workers: 1
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 4
 
     #__SECURITY_OUTPUTS__
