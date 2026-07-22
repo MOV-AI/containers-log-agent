@@ -62,7 +62,7 @@ The Log Agent implements a multi-stage processing pipeline optimized for MOV.AI 
 
 ```mermaid
 flowchart TD
-    A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service = backend|spawner|orchestrator|ros1-workspace|ros2-workspace?}
+  A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service in backend, spawner, orchestrator,<br/>ros1-workspace, ros2-workspace?}
     B -->|Yes| C[Re-tag to<br/>movai.logs]
     B -->|No| D[Keep tag<br/>docker.*]
 
