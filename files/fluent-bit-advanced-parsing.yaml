@@ -2,7 +2,7 @@
 # Full-featured mode: service routing + structured parsers + Lua post-processing
 #
 # Processing Pipeline:
-#   1. Service routing: separate backend/spawner from generic services
+#   1. Service routing: separate backend/spawner/orchestrator/ros1-workspace/ros2-workspace from generic services
 #   2. Lua post-processing: ANSI stripping + tag extraction
 #   3. Structured parsers: MOV.AI callback_logs + python_structured formats
 #   4. Generic fallback: app_logs + docker for other services
@@ -60,15 +60,15 @@ pipeline:
 
   filters:
     # STAGE 1: Identify MOV.AI services for structured log parsing
-    # Re-tag backend/spawner logs to 'movai.logs' for MOV.AI-specific parsing pipeline
+    # Re-tag backend/spawner/orchestrator/ros1-workspace/ros2-workspace logs to 'movai.logs' for MOV.AI-specific parsing pipeline
     # Other services keep 'docker.*' tag and go through generic parsing only
     - name: rewrite_tag
       match: docker.*
       rule:
-        - "$service ^(backend|spawner)$ movai.logs false"
+        - "$service ^(backend|spawner|orchestrator|ros1-workspace|ros2-workspace)$ movai.logs false"
       emitter_name: re_emitted
 
-    # STAGE 2: MOV.AI Structured Log Processing (backend & spawner only)
+    # STAGE 2: MOV.AI Structured Log Processing (movai.logs only)
     # Pre-processing: Strip ANSI color codes, extract callback tags, and normalize timestamps
     # MUST run BEFORE parsers to ensure clean data for pattern matching
     - name: lua

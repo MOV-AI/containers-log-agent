@@ -62,7 +62,7 @@ The Log Agent implements a multi-stage processing pipeline optimized for MOV.AI 
 
 ```mermaid
 flowchart TD
-    A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service = backend|spawner?}
+    A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service = backend|spawner|orchestrator|ros1-workspace|ros2-workspace?}
     B -->|Yes| C[Re-tag to<br/>movai.logs]
     B -->|No| D[Keep tag<br/>docker.*]
 
@@ -87,12 +87,12 @@ flowchart TD
 #### Stage 1: Service-Based Routing
 ```yaml
 rewrite_tag:
-  - Pattern: service = backend OR spawner
+  - Pattern: service = backend OR spawner OR orchestrator OR ros1-workspace OR ros2-workspace
   - Action: Re-tag to 'movai.logs'
   - Other services: Keep original 'docker.*' tag
 ```
 
-**Purpose**: Separate MOV.AI services (backend, spawner) that produce structured logs from other containers (redis, grafana, etc.) that use generic formats.
+**Purpose**: Separate MOV.AI services (backend, spawner, orchestrator, ros1-workspace, ros2-workspace) that produce structured logs from other containers (redis, grafana, etc.) that use generic formats.
 
 #### Stage 2: MOV.AI Structured Log Processing
 Applied **only** to logs tagged as `movai.logs`:
@@ -235,7 +235,7 @@ Applied to **all** logs (both `movai.logs` and `docker.*`):
 The multi-stage pipeline design provides significant performance benefits:
 
 **Service-Based Routing (rewrite_tag filter):**
-- Single regex pattern `^(backend|spawner)$` matches both MOV.AI services
+- Single regex pattern `^(backend|spawner|orchestrator|ros1-workspace|ros2-workspace)$` matches all MOV.AI services
 - Uses Fluent Bit's native field matching on `$service` record key
 - Eliminates need for multiple tag checks downstream
 
