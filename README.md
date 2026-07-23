@@ -62,7 +62,7 @@ The Log Agent implements a multi-stage processing pipeline optimized for MOV.AI 
 
 ```mermaid
 flowchart TD
-    A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service = backend|spawner?}
+  A[Docker Logs<br/>tag: docker.*] --> B{rewrite_tag<br/>service in backend, spawner, orchestrator,<br/>ros1-workspace, ros2-workspace?}
     B -->|Yes| C[Re-tag to<br/>movai.logs]
     B -->|No| D[Keep tag<br/>docker.*]
 
@@ -87,12 +87,12 @@ flowchart TD
 #### Stage 1: Service-Based Routing
 ```yaml
 rewrite_tag:
-  - Pattern: service = backend OR spawner
+  - Pattern: service = backend OR spawner OR orchestrator OR ros1-workspace OR ros2-workspace
   - Action: Re-tag to 'movai.logs'
   - Other services: Keep original 'docker.*' tag
 ```
 
-**Purpose**: Separate MOV.AI services (backend, spawner) that produce structured logs from other containers (redis, grafana, etc.) that use generic formats.
+**Purpose**: Separate MOV.AI services (backend, spawner, orchestrator, ros1-workspace, ros2-workspace) that produce structured logs from other containers (redis, grafana, etc.) that use generic formats.
 
 #### Stage 2: MOV.AI Structured Log Processing
 Applied **only** to logs tagged as `movai.logs`:
@@ -129,6 +129,7 @@ All parsers in `files/parsers.conf` are optimized for production use:
 3. **Unified Field Names**: All structured parsers extract consistent field names (`level`, `timestamp`, `module`, `funcName`, `lineno`, `message`)
 4. **Type Safety**: Lua filter includes type validation (`type(log_field) == "string"`) to prevent runtime errors
 5. **Performance Optimization**: Lua operations are conditional (ANSI stripping only if ESC char present)
+6. **Timestamp Authority**: For structured logs, Fluent Bit keeps ingest/event time as the Loki entry timestamp while preserving parsed `timestamp` as a searchable record field
 
 **Lua Filter Post-Processing** (`files/parse_callback_tags.lua`):
 - Extracts `ui` field: True/False, case-sensitive, exact match only
@@ -235,7 +236,7 @@ Applied to **all** logs (both `movai.logs` and `docker.*`):
 The multi-stage pipeline design provides significant performance benefits:
 
 **Service-Based Routing (rewrite_tag filter):**
-- Single regex pattern `^(backend|spawner)$` matches both MOV.AI services
+- Single regex pattern `^(backend|spawner|orchestrator|ros1-workspace|ros2-workspace)$` matches all MOV.AI services
 - Uses Fluent Bit's native field matching on `$service` record key
 - Eliminates need for multiple tag checks downstream
 
@@ -483,7 +484,7 @@ Query Loki to verify fields are properly extracted:
 {user_log=~"system|.*"}
 
 # Count logs by level and ui flag across all services
-count by (level, ui) ({service=~"backend|spawner"} | json | has_ui="true")
+count by (level, ui) ({service=~"backend|spawner|orchestrator|ros1-workspace|ros2-workspace"} | json | has_ui="true")
 
 # Find all callback logs with ui:True
 {has_ui="true", ui="True"} | json
