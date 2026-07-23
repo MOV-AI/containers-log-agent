@@ -19,6 +19,8 @@ service:
   flush: ${FLUSH_INTERVAL}
   daemon: off
   log_level: ${LOG_LEVEL}
+  scheduler.base: 3
+  scheduler.cap: 30
   http_server: ${ENABLE_HTTP_METRICS}
   http_listen: 0.0.0.0
   http_port: 2020
@@ -93,6 +95,15 @@ pipeline:
       workers: 2
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8
 
     - name: loki
       match: metrics.*
@@ -105,5 +116,14 @@ pipeline:
       workers: 1
       retry_limit: false
       net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 4
 
     #__SECURITY_OUTPUTS__
