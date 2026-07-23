@@ -1,7 +1,7 @@
 --============================================================================
 -- Lua Filter: parse_callback_tags
--- Purpose: Extract specific fields from callback_logs format and clean ANSI codes
--- Input: Record with 'tags' field (pipe-separated key:value pairs)
+-- Purpose: Extract specific fields from callback logs and clean ANSI codes
+-- Input: Record with parsed 'tags' field, or raw callback line in 'log'
 -- Output: Enhanced record with extracted fields and cleaned log
 --============================================================================
 -- Extracted Fields:
@@ -27,18 +27,36 @@
 --   - Single-pass regex operations throughout
 --============================================================================
 
-function parse_callback_tags(tag, timestamp, record)
+local function resolve_tags_str(record)
     local tags_str = record["tags"]
+    if tags_str and string.len(tags_str) > 0 then
+        return tags_str
+    end
+
+    local log_field = record["log"]
+    if type(log_field) ~= "string" then
+        return nil
+    end
+
+    -- Fast-path fallback for pre-parser callback logs:
+    -- [LEVEL][timestamp][module][function][lineno]: [tag:value|tag:value] message
+    return string.match(log_field, "^%[[^%]]+%]%[[^%]]+%]%[[^%]]+%]%[[^%]]+%]%[[0-9]+%]:%s*%[([^%]]*)%]")
+end
+
+function parse_callback_tags(tag, timestamp, record)
+    local tags_str = resolve_tags_str(record)
 
     -- Extract ui and node tags from pipe-separated tag list
     if tags_str and string.len(tags_str) > 0 then
 
-        -- Extract ui tag: must contain exactly True or False
-        -- Pattern: ui : optional_whitespace (True|False) optional_whitespace
-        local ui_match = string.match(tags_str, "ui%s*:%s*(True|False)")
-        if ui_match then
-            record["ui"] = ui_match
-            record["has_ui"] = true
+        -- Extract ui tag and only accept canonical boolean spellings.
+        local ui_raw = string.match(tags_str, "ui%s*:%s*([^|]+)")
+        if ui_raw then
+            local ui_match = string.match(ui_raw, "^%s*(.-)%s*$") or ui_raw
+            if ui_match == "True" or ui_match == "False" then
+                record["ui"] = ui_match
+                record["has_ui"] = true
+            end
         end
 
         -- Extract node tag: captures any value up to pipe separator or end of string
