@@ -5,6 +5,7 @@
 #   ENABLE_ADVANCED_PARSING (false) - service routing + lua + structured parsing
 #   SECURITY_LOGS_ENABLE (false) - host security logs ingestion (journald/audit/auth)
 #   SECURITY_LOGS_STRICT (false) - fail startup if required security sources are unavailable
+#   TELEMETRY_ENABLE (false) - MOV.AI platform telemetry socket -> Mimir (OTLP) + Loki
 #   ENABLE_COMPRESSION (true) - snappy compression
 #   ENABLE_STORAGE_METRICS (false) - storage statistics
 #   ENABLE_HTTP_METRICS (false) - HTTP metrics server
@@ -18,6 +19,7 @@ BUSYBOX_BIN="/bin/busybox"
 ENABLE_ADVANCED_PARSING="${ENABLE_ADVANCED_PARSING:=false}"
 SECURITY_LOGS_ENABLE="${SECURITY_LOGS_ENABLE:=false}"
 SECURITY_LOGS_STRICT="${SECURITY_LOGS_STRICT:=false}"
+TELEMETRY_ENABLE="${TELEMETRY_ENABLE:=false}"
 ENABLE_COMPRESSION="${ENABLE_COMPRESSION:=true}"
 ENABLE_STORAGE_METRICS="${ENABLE_STORAGE_METRICS:=false}"
 ENABLE_HTTP_METRICS="${ENABLE_HTTP_METRICS:=false}"
@@ -28,10 +30,17 @@ FLUENT_BIT_BACKLOG_MEM_LIMIT="${FLUENT_BIT_BACKLOG_MEM_LIMIT:=10M}"
 FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE="${FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE:=500M}"
 FLUENT_BIT_BUFFER_MAX_SIZE="${FLUENT_BIT_BUFFER_MAX_SIZE:=6M}"
 FLUENT_BIT_HOSTNAME="${FLUENT_BIT_HOSTNAME:=${DEVICE_NAME:-unknown}}"
+MIMIR_HOST="${MIMIR_HOST:=metrics-aggregator}"
+MIMIR_PORT="${MIMIR_PORT:=8080}"
+MOVAI_TELEMETRY_SOCKET="${MOVAI_TELEMETRY_SOCKET:=/opt/mov.ai/sockets/movai-platform-metrics.sock}"
 
 SECURITY_INPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-inputs.yamlfrag"
 SECURITY_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-filters.yamlfrag"
 SECURITY_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-outputs.yamlfrag"
+
+TELEMETRY_INPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-inputs.yamlfrag"
+TELEMETRY_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-filters.yamlfrag"
+TELEMETRY_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-outputs.yamlfrag"
 
 inject_fragment() {
     in_file="$1"
@@ -51,22 +60,33 @@ inject_fragment() {
     ' "$in_file" > "$out_file"
 }
 
+# Echoes a comma-separated list of the unreadable fragments among its arguments.
+unreadable_fragments() {
+    missing=""
+    for fragment in "$@"; do
+        if [ ! -r "$fragment" ]; then
+            if [ -z "$missing" ]; then
+                missing="$fragment"
+            else
+                missing="$missing, $fragment"
+            fi
+        fi
+    done
+    echo "$missing"
+}
+
+apply_fragment() {
+    inject_fragment "$WORK_CONFIG" "${WORK_CONFIG}.next" "$1" "$2"
+    "$BUSYBOX_BIN" mv -f "${WORK_CONFIG}.next" "$WORK_CONFIG"
+}
+
 compose_runtime_config() {
     base="$1"
     runtime="$2"
-    missing=""
 
-    if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
-        for fragment in "$SECURITY_INPUTS_FRAGMENT" "$SECURITY_FILTERS_FRAGMENT" "$SECURITY_OUTPUTS_FRAGMENT"; do
-            if [ ! -r "$fragment" ]; then
-                if [ -z "$missing" ]; then
-                    missing="$fragment"
-                else
-                    missing="$missing, $fragment"
-                fi
-            fi
-        done
-
+    inject_security="$SECURITY_LOGS_ENABLE"
+    if [ "$inject_security" = "true" ]; then
+        missing="$(unreadable_fragments "$SECURITY_INPUTS_FRAGMENT" "$SECURITY_FILTERS_FRAGMENT" "$SECURITY_OUTPUTS_FRAGMENT")"
         if [ -n "$missing" ]; then
             if [ "$SECURITY_LOGS_STRICT" = "true" ]; then
                 echo "ERROR: missing security fragments: $missing"
@@ -75,22 +95,42 @@ compose_runtime_config() {
 
             echo "WARN: missing security fragments: $missing"
             echo "WARN: continuing without security fragment injection"
-            "$BUSYBOX_BIN" grep -v '#__SECURITY_.*__' "$base" > "$runtime"
-            return 0
+            inject_security="false"
+        fi
+    fi
+
+    inject_telemetry="$TELEMETRY_ENABLE"
+    if [ "$inject_telemetry" = "true" ]; then
+        missing="$(unreadable_fragments "$TELEMETRY_INPUTS_FRAGMENT" "$TELEMETRY_FILTERS_FRAGMENT" "$TELEMETRY_OUTPUTS_FRAGMENT")"
+        if [ -n "$missing" ]; then
+            echo "ERROR: missing telemetry fragments: $missing"
+            exit 1
         fi
 
-        tmp1="${runtime}.tmp1"
-        tmp2="${runtime}.tmp2"
-
-        inject_fragment "$base" "$tmp1" "#__SECURITY_INPUTS__" "$SECURITY_INPUTS_FRAGMENT"
-        inject_fragment "$tmp1" "$tmp2" "#__SECURITY_FILTERS__" "$SECURITY_FILTERS_FRAGMENT"
-        inject_fragment "$tmp2" "$runtime" "#__SECURITY_OUTPUTS__" "$SECURITY_OUTPUTS_FRAGMENT"
-
-        "$BUSYBOX_BIN" rm -f "$tmp1" "$tmp2"
-    else
-        # Strip markers when security ingestion is disabled.
-        "$BUSYBOX_BIN" grep -v '#__SECURITY_.*__' "$base" > "$runtime"
+        socket_dir="$("$BUSYBOX_BIN" dirname "$MOVAI_TELEMETRY_SOCKET")"
+        if [ ! -d "$socket_dir" ]; then
+            echo "ERROR: TELEMETRY_ENABLE=true but $socket_dir is not mounted"
+            exit 1
+        fi
     fi
+
+    WORK_CONFIG="${runtime}.work"
+    "$BUSYBOX_BIN" cp -f "$base" "$WORK_CONFIG"
+
+    if [ "$inject_security" = "true" ]; then
+        apply_fragment "#__SECURITY_INPUTS__" "$SECURITY_INPUTS_FRAGMENT"
+        apply_fragment "#__SECURITY_FILTERS__" "$SECURITY_FILTERS_FRAGMENT"
+        apply_fragment "#__SECURITY_OUTPUTS__" "$SECURITY_OUTPUTS_FRAGMENT"
+    fi
+
+    if [ "$inject_telemetry" = "true" ]; then
+        apply_fragment "#__TELEMETRY_INPUTS__" "$TELEMETRY_INPUTS_FRAGMENT"
+        apply_fragment "#__TELEMETRY_FILTERS__" "$TELEMETRY_FILTERS_FRAGMENT"
+        apply_fragment "#__TELEMETRY_OUTPUTS__" "$TELEMETRY_OUTPUTS_FRAGMENT"
+    fi
+
+    "$BUSYBOX_BIN" grep -vE '#__(SECURITY|TELEMETRY)_.*__' "$WORK_CONFIG" > "$runtime"
+    "$BUSYBOX_BIN" rm -f "$WORK_CONFIG"
 }
 
 # Select configuration file based on feature flags
@@ -155,6 +195,7 @@ echo "Config: $CONFIG_FILE"
 echo "ENABLE_ADVANCED_PARSING: $ENABLE_ADVANCED_PARSING"
 echo "SECURITY_LOGS_ENABLE: $SECURITY_LOGS_ENABLE"
 echo "SECURITY_LOGS_STRICT: $SECURITY_LOGS_STRICT"
+echo "TELEMETRY_ENABLE: $TELEMETRY_ENABLE"
 echo "ENABLE_COMPRESSION: $ENABLE_COMPRESSION"
 echo "ENABLE_STORAGE_METRICS: $ENABLE_STORAGE_METRICS"
 echo "ENABLE_HTTP_METRICS: $ENABLE_HTTP_METRICS"
@@ -164,6 +205,10 @@ if [ -z "$LOKI_HOST" ]; then
     echo "Loki disabled: LOKI_HOST not set (logs will be buffered locally but not sent to any log-aggregator)"
 else
     echo "Loki enabled: LOKI_HOST=$LOKI_HOST"
+fi
+
+if [ "$TELEMETRY_ENABLE" = "true" ]; then
+    echo "Telemetry enabled: socket=$MOVAI_TELEMETRY_SOCKET, mimir=$MIMIR_HOST:$MIMIR_PORT"
 fi
 echo ""
 
@@ -199,6 +244,10 @@ export ENABLE_HTTP_METRICS
 export ENABLE_ADVANCED_PARSING
 export SECURITY_LOGS_ENABLE
 export SECURITY_LOGS_STRICT
+export TELEMETRY_ENABLE
+export MIMIR_HOST
+export MIMIR_PORT
+export MOVAI_TELEMETRY_SOCKET
 export FLUSH_INTERVAL
 export FLUENT_BIT_BACKLOG_MEM_LIMIT
 export FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE

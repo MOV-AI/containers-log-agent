@@ -55,6 +55,8 @@ pipeline:
 
     #__SECURITY_INPUTS__
 
+    #__TELEMETRY_INPUTS__
+
   filters:
     # STAGE 1: Generic parsers (fallback) for all logs
     # Applied to all services - simple and efficient
@@ -73,6 +75,8 @@ pipeline:
       reserve_data: true
 
     #__SECURITY_FILTERS__
+
+    #__TELEMETRY_FILTERS__
 
   outputs:
     # Logs output to Loki
@@ -127,3 +131,5 @@ pipeline:
       net.max_worker_connections: 4
 
     #__SECURITY_OUTPUTS__
+
+    #__TELEMETRY_OUTPUTS__
