@@ -5,7 +5,7 @@
       host: ${MIMIR_HOST}
       port: ${MIMIR_PORT}
       metrics_uri: /otlp/v1/metrics
-      compress: ${ENABLE_COMPRESSION}
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
       retry_limit: false
       net.dns.mode: TCP
@@ -23,7 +23,7 @@
       labels: source=movai_telemetry
       label_keys: $telemetry_type,$event_type,$robot,$service,$alert_id,$severity,$flow,$node
       line_format: json
-      compress: ${ENABLE_COMPRESSION}
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
       retry_limit: false
       net.dns.mode: TCP
@@ -40,7 +40,7 @@
       labels: source=movai_notifications
       label_keys: $telemetry_type,$notification_type,$notification_id,$notification_state,$severity,$robot,$service
       line_format: json
-      compress: ${ENABLE_COMPRESSION}
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
       retry_limit: false
       net.dns.mode: TCP
@@ -57,7 +57,7 @@
       labels: source=movai_alerts
       label_keys: $telemetry_type,$alert,$alert_id,$robot,$fleet,$service,$deactivation_type
       line_format: json
-      compress: ${ENABLE_COMPRESSION}
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
       retry_limit: false
       net.dns.mode: TCP

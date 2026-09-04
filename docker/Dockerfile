@@ -1,8 +1,8 @@
 # Build stage: Get busybox
-FROM busybox:1.37.0 AS busybox_builder
+FROM busybox:1.38.0 AS busybox_builder
 
 # Main image
-FROM fluent/fluent-bit:4.2.3 AS base
+FROM fluent/fluent-bit:5.1.1 AS base
 
 # Copy busybox from builder stage
 COPY --from=busybox_builder /bin/busybox /bin/busybox
@@ -45,6 +45,7 @@ ENV ENABLE_COMPRESSION=true
 ENV ENABLE_STORAGE_METRICS=false
 ENV ENABLE_HTTP_METRICS=false
 ENV TELEMETRY_ENABLE=false
+ENV ENABLE_TELEMETRY_COMPRESSION=true
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["/bin/busybox", "pidof", "fluent-bit"]
 
