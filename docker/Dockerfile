@@ -37,7 +37,7 @@ ENV LOKI_HOST=loki
 ENV LOKI_PORT=3100
 ENV MIMIR_HOST=metrics-store
 ENV MIMIR_PORT=8080
-ENV MOVAI_TELEMETRY_SOCKET=/opt/mov.ai/sockets/movai-platform-metrics.sock
+ENV MOVAI_TELEMETRY_SOCKET=/opt/mov.ai/comm/movai-platform-metrics.sock
 
 # Feature Flags
 ENV ENABLE_ADVANCED_PARSING=false

@@ -33,7 +33,7 @@ FLUENT_BIT_BUFFER_MAX_SIZE="${FLUENT_BIT_BUFFER_MAX_SIZE:=6M}"
 FLUENT_BIT_HOSTNAME="${FLUENT_BIT_HOSTNAME:=${DEVICE_NAME:-unknown}}"
 MIMIR_HOST="${MIMIR_HOST:=metrics-store}"
 MIMIR_PORT="${MIMIR_PORT:=8080}"
-MOVAI_TELEMETRY_SOCKET="${MOVAI_TELEMETRY_SOCKET:=/opt/mov.ai/sockets/movai-platform-metrics.sock}"
+MOVAI_TELEMETRY_SOCKET="${MOVAI_TELEMETRY_SOCKET:=/opt/mov.ai/comm/movai-platform-metrics.sock}"
 
 SECURITY_INPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-inputs.yamlfrag"
 SECURITY_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-filters.yamlfrag"
