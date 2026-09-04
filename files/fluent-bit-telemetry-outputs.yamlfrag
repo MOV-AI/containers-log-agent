@@ -1,0 +1,67 @@
+    # Numeric telemetry goes to Mimir over OTLP.
+    - name: opentelemetry
+      match: movai.telemetry.metrics.generated
+      log_level: ${LOG_LEVEL}
+      host: ${MIMIR_HOST}
+      port: ${MIMIR_PORT}
+      metrics_uri: /otlp/v1/metrics
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+
+    # Everything non-numeric stays in Loki, one stream per telemetry kind.
+    - name: loki
+      match: movai.telemetry.events
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=movai_telemetry
+      label_keys: $telemetry_type,$event_type,$robot,$service,$alert_id,$severity,$flow,$node
+      line_format: json
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+
+    - name: loki
+      match: movai.telemetry.notifications
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=movai_notifications
+      label_keys: $telemetry_type,$notification_type,$notification_id,$notification_state,$severity,$robot,$service
+      line_format: json
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+
+    - name: loki
+      match: movai.telemetry.alerts
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=movai_alerts
+      label_keys: $telemetry_type,$alert,$alert_id,$robot,$fleet,$service,$deactivation_type
+      line_format: json
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s

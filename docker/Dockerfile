@@ -1,8 +1,8 @@
 # Build stage: Get busybox
-FROM busybox:1.37.0 AS busybox_builder
+FROM busybox:1.38.0 AS busybox_builder
 
 # Main image
-FROM fluent/fluent-bit:4.2.3 AS base
+FROM fluent/fluent-bit:5.1.1 AS base
 
 # Copy busybox from builder stage
 COPY --from=busybox_builder /bin/busybox /bin/busybox
@@ -35,12 +35,17 @@ ENV DEVICE_NAME=manager
 ENV APP_NAME=default
 ENV LOKI_HOST=loki
 ENV LOKI_PORT=3100
+ENV MIMIR_HOST=metrics-store
+ENV MIMIR_PORT=8080
+ENV MOVAI_TELEMETRY_SOCKET=/opt/mov.ai/comm/movai-platform-metrics.sock
 
 # Feature Flags
 ENV ENABLE_ADVANCED_PARSING=false
 ENV ENABLE_COMPRESSION=true
 ENV ENABLE_STORAGE_METRICS=false
 ENV ENABLE_HTTP_METRICS=false
+ENV TELEMETRY_ENABLE=false
+ENV ENABLE_TELEMETRY_COMPRESSION=true
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["/bin/busybox", "pidof", "fluent-bit"]
 

@@ -1,0 +1,8 @@
+    # MOV.AI platform telemetry: unix socket written by orchestrator, backend and ros workspaces.
+    - name: forward
+      unix_path: ${MOVAI_TELEMETRY_SOCKET}
+      unix_perm: 0666
+      tag: movai.telemetry.raw
+      buffer_chunk_size: 1M
+      buffer_max_size: ${FLUENT_BIT_BUFFER_MAX_SIZE}
+      storage.type: filesystem

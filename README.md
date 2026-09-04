@@ -320,6 +320,7 @@ Parsed log fields are exported as Loki labels based on configuration:
 | `SECURITY_LOGS_STRICT` | Fail startup if security sources/fragments unavailable | `false` |
 | `ENABLE_COMPRESSION` | Enable Loki snappy compression | `true` |
 | `ENABLE_STORAGE_METRICS` | Enable Fluent Bit storage metrics | `false` |
+| `ENABLE_TELEMETRY_COMPRESSION` | Enable telemetry data compression | `false` |
 | `ENABLE_HTTP_METRICS` | Enable Fluent Bit HTTP metrics endpoint | `false` |
 | `FLUSH_INTERVAL` | Service flush interval seconds | `5` |
 | `FLUENT_BIT_BACKLOG_MEM_LIMIT` | Backlog memory limit | `10M` |
