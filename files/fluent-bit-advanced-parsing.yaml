@@ -60,6 +60,8 @@ pipeline:
 
     #__SECURITY_INPUTS__
 
+    #__TELEMETRY_INPUTS__
+
   filters:
     # STAGE 1: Identify MOV.AI services for structured log parsing
     # Re-tag backend/spawner/orchestrator/ros1-workspace/ros2-workspace logs to 'movai.logs' for MOV.AI-specific parsing pipeline
@@ -118,6 +120,8 @@ pipeline:
       reserve_data: true
 
     #__SECURITY_FILTERS__
+
+    #__TELEMETRY_FILTERS__
 
   outputs:
     # Logs output to Loki
@@ -201,3 +205,5 @@ pipeline:
       net.max_worker_connections: 4
 
     #__SECURITY_OUTPUTS__
+
+    #__TELEMETRY_OUTPUTS__

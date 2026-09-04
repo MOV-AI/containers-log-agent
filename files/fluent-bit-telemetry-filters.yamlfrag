@@ -1,0 +1,25 @@
+    # Split the single telemetry stream by telemetry_type so each kind gets its own backend.
+    - name: rewrite_tag
+      match: movai.telemetry.raw
+      rule:
+        - "$telemetry_type ^metric$ movai.telemetry.metrics false"
+        - "$telemetry_type ^event$ movai.telemetry.events false"
+        - "$telemetry_type ^notification$ movai.telemetry.notifications false"
+        - "$telemetry_type ^alert$ movai.telemetry.alerts false"
+
+    # Turn numeric telemetry records into real metrics so they can be pushed over OTLP.
+    - name: log_to_metrics
+      match: movai.telemetry.metrics
+      tag: movai.telemetry.metrics.generated
+      metric_mode: gauge
+      metric_name: movai_metric_value
+      metric_description: MOVAI numeric telemetry value
+      value_field: value
+      label_field:
+        - metric_name
+        - robot
+        - service
+        - flow
+        - node
+        - alert_id
+        - event_type
