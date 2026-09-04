@@ -35,7 +35,7 @@ ENV DEVICE_NAME=manager
 ENV APP_NAME=default
 ENV LOKI_HOST=loki
 ENV LOKI_PORT=3100
-ENV MIMIR_HOST=metrics-aggregator
+ENV MIMIR_HOST=metrics-store
 ENV MIMIR_PORT=8080
 ENV MOVAI_TELEMETRY_SOCKET=/opt/mov.ai/sockets/movai-platform-metrics.sock
 
