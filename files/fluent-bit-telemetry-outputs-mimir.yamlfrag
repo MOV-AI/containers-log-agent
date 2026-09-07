@@ -1,0 +1,15 @@
+    # Numeric telemetry goes to Mimir over OTLP.
+    - name: opentelemetry
+      match: movai.telemetry.metrics.generated
+      log_level: ${LOG_LEVEL}
+      host: ${MIMIR_HOST}
+      port: ${MIMIR_PORT}
+      metrics_uri: /otlp/v1/metrics
+      compress: ${ENABLE_TELEMETRY_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
