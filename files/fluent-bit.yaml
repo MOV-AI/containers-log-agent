@@ -6,6 +6,8 @@
 #   ENABLE_COMPRESSION: snappy or off (default: snappy)
 #   ENABLE_STORAGE_METRICS: on or off (default: off)
 #   ENABLE_HTTP_METRICS: true or false (default: false)
+#   ENABLE_LOKI_OUTPUT: true or false (default: true) - skips Loki outputs/filters when no Loki server is deployed
+#   ENABLE_MIMIR_OUTPUT: true or false (default: true) - skips the telemetry Mimir/OTLP output when no Mimir server is deployed
 
 env:
   # cannot be overridden by ENV vars if defined here
@@ -58,78 +60,28 @@ pipeline:
     #__TELEMETRY_INPUTS__
 
   filters:
-    # STAGE 1: Generic parsers (fallback) for all logs
-    # Applied to all services - simple and efficient
-    - name: parser
-      match: docker.*
-      key_name: log
-      parser: app_logs
-      preserve_key: true
-      reserve_data: true
+    # Fallback no-op (never matches any real tag): keeps this section non-empty when all optional filters below are disabled.
+    - name: modify
+      match: __disabled__
+      copy: dummy dummy
 
-    - name: parser
-      match: docker.*
-      key_name: log
-      parser: docker
-      preserve_key: true
-      reserve_data: true
+    #__CORE_LOKI_FILTERS__
 
     #__SECURITY_FILTERS__
 
     #__TELEMETRY_FILTERS__
 
-  outputs:
-    # Logs output to Loki
-    - name: loki
-      match: docker.*
-      log_level: ${LOG_LEVEL}
-      host: ${LOKI_HOST}
-      port: ${LOKI_PORT}
-      labels: source=docker
-      # label_keys specifies which fields from the log record should be included as labels in Loki
-      # This allows for efficient querying and filtering based on these fields.
-      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
-      label_keys: $container_name,$service,$robot,$user_log,$level
-      # remove_keys specifies which fields should be removed from the log record before sending to Loki
-      # This is useful for excluding fields that are not needed in Loki
-      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
-      remove_keys: container_id,lineno,module,funcName
-      line_format: key_value
-      compress: ${ENABLE_COMPRESSION}
-      workers: 2
-      retry_limit: false
-      net.dns.mode: TCP
-      net.connect_timeout: 15s
-      net.io_timeout: 60s
-      net.keepalive: true
-      net.keepalive_idle_timeout: 90s
-      net.tcp_keepalive: true
-      net.tcp_keepalive_time: 30
-      net.tcp_keepalive_interval: 10
-      net.tcp_keepalive_probes: 6
-      net.max_worker_connections: 8
+    #__TELEMETRY_FILTERS_MIMIR__
 
-    - name: loki
-      match: metrics.*
-      log_level: ${LOG_LEVEL}
-      host: ${LOKI_HOST}
-      port: ${LOKI_PORT}
-      labels: source=metrics
-      line_format: key_value
-      compress: ${ENABLE_COMPRESSION}
-      workers: 1
-      retry_limit: false
-      net.dns.mode: TCP
-      net.connect_timeout: 15s
-      net.io_timeout: 60s
-      net.keepalive: true
-      net.keepalive_idle_timeout: 90s
-      net.tcp_keepalive: true
-      net.tcp_keepalive_time: 30
-      net.tcp_keepalive_interval: 10
-      net.tcp_keepalive_probes: 6
-      net.max_worker_connections: 4
+  outputs:
+    # Fallback no-op (never matches any real tag): keeps this section non-empty when all optional outputs below are disabled.
+    - name: null
+      match: __disabled__
+
+    #__CORE_LOKI_OUTPUTS__
 
     #__SECURITY_OUTPUTS__
 
-    #__TELEMETRY_OUTPUTS__
+    #__TELEMETRY_OUTPUTS_LOKI__
+
+    #__TELEMETRY_OUTPUTS_MIMIR__

@@ -52,6 +52,8 @@ The Log Agent uses environment variable-driven Fluent Bit configuration files:
   - `ENABLE_ADVANCED_PARSING`
   - `SECURITY_LOGS_ENABLE`
   - `SECURITY_LOGS_STRICT`
+  - `ENABLE_LOKI_OUTPUT`
+  - `ENABLE_MIMIR_OUTPUT`
   - `ENABLE_COMPRESSION`
   - `ENABLE_STORAGE_METRICS`
   - `ENABLE_HTTP_METRICS`
@@ -318,6 +320,8 @@ Parsed log fields are exported as Loki labels based on configuration:
 | `ENABLE_ADVANCED_PARSING` | Enable MOV.AI structured routing/parsers | `false` |
 | `SECURITY_LOGS_ENABLE` | Enable host security event ingestion | `false` |
 | `SECURITY_LOGS_STRICT` | Fail startup if security sources/fragments unavailable | `false` |
+| `ENABLE_LOKI_OUTPUT` | Enable Loki outputs and their label-building filters; disable when no Loki server is deployed | `true` |
+| `ENABLE_MIMIR_OUTPUT` | Enable the telemetry Mimir/OTLP output and its metric-conversion filter; disable when no Mimir server is deployed | `true` |
 | `ENABLE_COMPRESSION` | Enable Loki snappy compression | `true` |
 | `ENABLE_STORAGE_METRICS` | Enable Fluent Bit storage metrics | `false` |
 | `ENABLE_TELEMETRY_COMPRESSION` | Enable telemetry data compression | `false` |
@@ -335,14 +339,16 @@ At startup, the entrypoint composes `/tmp/fluent-bit-runtime.yaml`:
 1. Select base config:
   - `files/fluent-bit.yaml` when `ENABLE_ADVANCED_PARSING=false`
   - `files/fluent-bit-advanced-parsing.yaml` when `ENABLE_ADVANCED_PARSING=true`
-2. If `SECURITY_LOGS_ENABLE=true`, inject these fragments at markers:
+2. If `ENABLE_LOKI_OUTPUT=true` (default), inject the core Loki filters/outputs fragments (generic or advanced variant); otherwise these are stripped entirely, along with security ingestion (Loki is its only destination) and any telemetry Loki outputs.
+3. If `SECURITY_LOGS_ENABLE=true` and `ENABLE_LOKI_OUTPUT=true`, inject these fragments at markers:
   - `files/fluent-bit-security-inputs.yamlfrag`
   - `files/fluent-bit-security-filters.yamlfrag`
   - `files/fluent-bit-security-outputs.yamlfrag`
-3. If security is disabled, strip security markers from base config.
-4. If security is enabled but fragments are missing:
+4. If security is disabled (or Loki is disabled), strip security markers from base config.
+5. If security is enabled but fragments are missing:
   - strict true: startup fails
   - strict false: warning + continue without security injection
+6. If `TELEMETRY_ENABLE=true` and at least one of `ENABLE_LOKI_OUTPUT`/`ENABLE_MIMIR_OUTPUT` is true, inject the telemetry socket input and the shared `rewrite_tag` filter, plus the Loki outputs (if `ENABLE_LOKI_OUTPUT=true`) and/or the `log_to_metrics` filter + OTLP output (if `ENABLE_MIMIR_OUTPUT=true`).
 
 
 ## Related Services

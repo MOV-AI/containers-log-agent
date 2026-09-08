@@ -6,6 +6,8 @@
 #   SECURITY_LOGS_ENABLE (false) - host security logs ingestion (journald/audit/auth)
 #   SECURITY_LOGS_STRICT (false) - fail startup if required security sources are unavailable
 #   TELEMETRY_ENABLE (false) - MOV.AI platform telemetry socket -> Mimir (OTLP) + Loki
+#   ENABLE_LOKI_OUTPUT (true) - disable when no Loki server is deployed, to skip Loki outputs/filters
+#   ENABLE_MIMIR_OUTPUT (true) - disable when no Mimir server is deployed, to skip the telemetry OTLP output
 #   ENABLE_COMPRESSION (true) - snappy compression
 #   ENABLE_STORAGE_METRICS (false) - storage statistics
 #   ENABLE_HTTP_METRICS (false) - HTTP metrics server
@@ -20,6 +22,8 @@ ENABLE_ADVANCED_PARSING="${ENABLE_ADVANCED_PARSING:=false}"
 SECURITY_LOGS_ENABLE="${SECURITY_LOGS_ENABLE:=false}"
 SECURITY_LOGS_STRICT="${SECURITY_LOGS_STRICT:=false}"
 TELEMETRY_ENABLE="${TELEMETRY_ENABLE:=false}"
+ENABLE_LOKI_OUTPUT="${ENABLE_LOKI_OUTPUT:=true}"
+ENABLE_MIMIR_OUTPUT="${ENABLE_MIMIR_OUTPUT:=true}"
 ENABLE_COMPRESSION="${ENABLE_COMPRESSION:=true}"
 ENABLE_STORAGE_METRICS="${ENABLE_STORAGE_METRICS:=false}"
 ENABLE_HTTP_METRICS="${ENABLE_HTTP_METRICS:=false}"
@@ -41,7 +45,18 @@ SECURITY_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-outputs.yamlfrag"
 
 TELEMETRY_INPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-inputs.yamlfrag"
 TELEMETRY_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-filters.yamlfrag"
-TELEMETRY_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-outputs.yamlfrag"
+TELEMETRY_FILTERS_MIMIR_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-filters-mimir.yamlfrag"
+TELEMETRY_OUTPUTS_LOKI_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-outputs-loki.yamlfrag"
+TELEMETRY_OUTPUTS_MIMIR_FRAGMENT="/fluent-bit/etc/fluent-bit-telemetry-outputs-mimir.yamlfrag"
+
+# Core Loki filters/outputs have a generic and an advanced-parsing variant, selected below.
+if [ "$ENABLE_ADVANCED_PARSING" = "true" ]; then
+    CORE_LOKI_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-core-loki-filters-advanced.yamlfrag"
+    CORE_LOKI_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-core-loki-outputs-advanced.yamlfrag"
+else
+    CORE_LOKI_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-core-loki-filters.yamlfrag"
+    CORE_LOKI_OUTPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-core-loki-outputs.yamlfrag"
+fi
 
 inject_fragment() {
     in_file="$1"
@@ -85,7 +100,12 @@ compose_runtime_config() {
     base="$1"
     runtime="$2"
 
+    # Security logs are only ever shipped to Loki, so skip the whole pipeline when Loki is disabled.
     inject_security="$SECURITY_LOGS_ENABLE"
+    if [ "$inject_security" = "true" ] && [ "$ENABLE_LOKI_OUTPUT" != "true" ]; then
+        echo "WARN: SECURITY_LOGS_ENABLE=true but ENABLE_LOKI_OUTPUT=false; skipping security log ingestion"
+        inject_security="false"
+    fi
     if [ "$inject_security" = "true" ]; then
         missing="$(unreadable_fragments "$SECURITY_INPUTS_FRAGMENT" "$SECURITY_FILTERS_FRAGMENT" "$SECURITY_OUTPUTS_FRAGMENT")"
         if [ -n "$missing" ]; then
@@ -100,9 +120,23 @@ compose_runtime_config() {
         fi
     fi
 
+    # Telemetry is only worth ingesting if at least one of its backends (Loki, Mimir) is enabled.
     inject_telemetry="$TELEMETRY_ENABLE"
+    if [ "$inject_telemetry" = "true" ] && [ "$ENABLE_LOKI_OUTPUT" != "true" ] && [ "$ENABLE_MIMIR_OUTPUT" != "true" ]; then
+        echo "WARN: TELEMETRY_ENABLE=true but both ENABLE_LOKI_OUTPUT and ENABLE_MIMIR_OUTPUT are false; skipping telemetry ingestion"
+        inject_telemetry="false"
+    fi
+    inject_telemetry_loki="false"
+    inject_telemetry_mimir="false"
     if [ "$inject_telemetry" = "true" ]; then
-        missing="$(unreadable_fragments "$TELEMETRY_INPUTS_FRAGMENT" "$TELEMETRY_FILTERS_FRAGMENT" "$TELEMETRY_OUTPUTS_FRAGMENT")"
+        telemetry_fragments="$TELEMETRY_INPUTS_FRAGMENT $TELEMETRY_FILTERS_FRAGMENT"
+        if [ "$ENABLE_LOKI_OUTPUT" = "true" ]; then
+            telemetry_fragments="$telemetry_fragments $TELEMETRY_OUTPUTS_LOKI_FRAGMENT"
+        fi
+        if [ "$ENABLE_MIMIR_OUTPUT" = "true" ]; then
+            telemetry_fragments="$telemetry_fragments $TELEMETRY_FILTERS_MIMIR_FRAGMENT $TELEMETRY_OUTPUTS_MIMIR_FRAGMENT"
+        fi
+        missing="$(unreadable_fragments $telemetry_fragments)"
         if [ -n "$missing" ]; then
             echo "ERROR: missing telemetry fragments: $missing"
             exit 1
@@ -113,10 +147,18 @@ compose_runtime_config() {
             echo "ERROR: TELEMETRY_ENABLE=true but $socket_dir is not mounted"
             exit 1
         fi
+
+        inject_telemetry_loki="$ENABLE_LOKI_OUTPUT"
+        inject_telemetry_mimir="$ENABLE_MIMIR_OUTPUT"
     fi
 
     WORK_CONFIG="${runtime}.work"
     "$BUSYBOX_BIN" cp -f "$base" "$WORK_CONFIG"
+
+    if [ "$ENABLE_LOKI_OUTPUT" = "true" ]; then
+        apply_fragment "#__CORE_LOKI_FILTERS__" "$CORE_LOKI_FILTERS_FRAGMENT"
+        apply_fragment "#__CORE_LOKI_OUTPUTS__" "$CORE_LOKI_OUTPUTS_FRAGMENT"
+    fi
 
     if [ "$inject_security" = "true" ]; then
         apply_fragment "#__SECURITY_INPUTS__" "$SECURITY_INPUTS_FRAGMENT"
@@ -127,10 +169,16 @@ compose_runtime_config() {
     if [ "$inject_telemetry" = "true" ]; then
         apply_fragment "#__TELEMETRY_INPUTS__" "$TELEMETRY_INPUTS_FRAGMENT"
         apply_fragment "#__TELEMETRY_FILTERS__" "$TELEMETRY_FILTERS_FRAGMENT"
-        apply_fragment "#__TELEMETRY_OUTPUTS__" "$TELEMETRY_OUTPUTS_FRAGMENT"
+    fi
+    if [ "$inject_telemetry_mimir" = "true" ]; then
+        apply_fragment "#__TELEMETRY_FILTERS_MIMIR__" "$TELEMETRY_FILTERS_MIMIR_FRAGMENT"
+        apply_fragment "#__TELEMETRY_OUTPUTS_MIMIR__" "$TELEMETRY_OUTPUTS_MIMIR_FRAGMENT"
+    fi
+    if [ "$inject_telemetry_loki" = "true" ]; then
+        apply_fragment "#__TELEMETRY_OUTPUTS_LOKI__" "$TELEMETRY_OUTPUTS_LOKI_FRAGMENT"
     fi
 
-    "$BUSYBOX_BIN" grep -vE '#__(SECURITY|TELEMETRY)_.*__' "$WORK_CONFIG" > "$runtime"
+    "$BUSYBOX_BIN" grep -vE '#__(SECURITY|TELEMETRY|CORE_LOKI)_.*__' "$WORK_CONFIG" > "$runtime"
     "$BUSYBOX_BIN" rm -f "$WORK_CONFIG"
 }
 
@@ -197,16 +245,24 @@ echo "ENABLE_ADVANCED_PARSING: $ENABLE_ADVANCED_PARSING"
 echo "SECURITY_LOGS_ENABLE: $SECURITY_LOGS_ENABLE"
 echo "SECURITY_LOGS_STRICT: $SECURITY_LOGS_STRICT"
 echo "TELEMETRY_ENABLE: $TELEMETRY_ENABLE"
+echo "ENABLE_LOKI_OUTPUT: $ENABLE_LOKI_OUTPUT"
+echo "ENABLE_MIMIR_OUTPUT: $ENABLE_MIMIR_OUTPUT"
 echo "ENABLE_COMPRESSION: $ENABLE_COMPRESSION"
 echo "ENABLE_STORAGE_METRICS: $ENABLE_STORAGE_METRICS"
 echo "ENABLE_HTTP_METRICS: $ENABLE_HTTP_METRICS"
 echo "ENABLE_TELEMETRY_COMPRESSION: $ENABLE_TELEMETRY_COMPRESSION"
 
 # Check Loki availability
-if [ -z "$LOKI_HOST" ]; then
+if [ "$ENABLE_LOKI_OUTPUT" != "true" ]; then
+    echo "Loki disabled: ENABLE_LOKI_OUTPUT=false (Loki outputs/filters skipped for performance)"
+elif [ -z "$LOKI_HOST" ]; then
     echo "Loki disabled: LOKI_HOST not set (logs will be buffered locally but not sent to any log-aggregator)"
 else
     echo "Loki enabled: LOKI_HOST=$LOKI_HOST"
+fi
+
+if [ "$ENABLE_MIMIR_OUTPUT" != "true" ]; then
+    echo "Mimir disabled: ENABLE_MIMIR_OUTPUT=false (telemetry OTLP output skipped for performance)"
 fi
 
 if [ "$TELEMETRY_ENABLE" = "true" ]; then
@@ -255,6 +311,8 @@ export ENABLE_ADVANCED_PARSING
 export SECURITY_LOGS_ENABLE
 export SECURITY_LOGS_STRICT
 export TELEMETRY_ENABLE
+export ENABLE_LOKI_OUTPUT
+export ENABLE_MIMIR_OUTPUT
 export ENABLE_TELEMETRY_COMPRESSION
 export MIMIR_HOST
 export MIMIR_PORT
