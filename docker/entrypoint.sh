@@ -38,6 +38,27 @@ FLUENT_BIT_HOSTNAME="${FLUENT_BIT_HOSTNAME:=${DEVICE_NAME:-unknown}}"
 MIMIR_HOST="${MIMIR_HOST:=metrics-store}"
 MIMIR_PORT="${MIMIR_PORT:=8080}"
 MOVAI_TELEMETRY_SOCKET="${MOVAI_TELEMETRY_SOCKET:=/opt/mov.ai/comm/movai-platform-metrics.sock}"
+LOG_LEVEL="${LOG_LEVEL:=warning}"
+
+# Startup logs mimic the fluent-bit line format so the whole stream stays homogeneous.
+case "$LOG_LEVEL" in
+    error) LOG_VERBOSITY=1 ;;
+    warn|warning) LOG_VERBOSITY=2 ;;
+    debug|trace) LOG_VERBOSITY=4 ;;
+    *) LOG_VERBOSITY=3 ;;
+esac
+
+_log() {
+    level="$1"
+    shift
+    printf '[%s] [%5s] [entrypoint] %s\n' "$("$BUSYBOX_BIN" date '+%Y/%m/%d %H:%M:%S')" "$level" "$*"
+}
+
+log_error() { _log error "$@" >&2; }
+log_warn() { if [ "$LOG_VERBOSITY" -ge 2 ]; then _log warn "$@" >&2; fi; }
+# Startup summary is always emitted, regardless of LOG_LEVEL.
+log_info() { _log info "$@"; }
+log_detail() { if [ "$LOG_VERBOSITY" -ge 3 ]; then _log info "$@"; fi; }
 
 SECURITY_INPUTS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-inputs.yamlfrag"
 SECURITY_FILTERS_FRAGMENT="/fluent-bit/etc/fluent-bit-security-filters.yamlfrag"
@@ -103,19 +124,18 @@ compose_runtime_config() {
     # Security logs are only ever shipped to Loki, so skip the whole pipeline when Loki is disabled.
     inject_security="$SECURITY_LOGS_ENABLE"
     if [ "$inject_security" = "true" ] && [ "$ENABLE_LOKI_OUTPUT" != "true" ]; then
-        echo "WARN: SECURITY_LOGS_ENABLE=true but ENABLE_LOKI_OUTPUT=false; skipping security log ingestion"
+        log_warn "SECURITY_LOGS_ENABLE=true but ENABLE_LOKI_OUTPUT=false; skipping security log ingestion"
         inject_security="false"
     fi
     if [ "$inject_security" = "true" ]; then
         missing="$(unreadable_fragments "$SECURITY_INPUTS_FRAGMENT" "$SECURITY_FILTERS_FRAGMENT" "$SECURITY_OUTPUTS_FRAGMENT")"
         if [ -n "$missing" ]; then
             if [ "$SECURITY_LOGS_STRICT" = "true" ]; then
-                echo "ERROR: missing security fragments: $missing"
+                log_error "missing security fragments: $missing"
                 exit 1
             fi
 
-            echo "WARN: missing security fragments: $missing"
-            echo "WARN: continuing without security fragment injection"
+            log_warn "missing security fragments: $missing; continuing without security fragment injection"
             inject_security="false"
         fi
     fi
@@ -123,7 +143,7 @@ compose_runtime_config() {
     # Telemetry is only worth ingesting if at least one of its backends (Loki, Mimir) is enabled.
     inject_telemetry="$TELEMETRY_ENABLE"
     if [ "$inject_telemetry" = "true" ] && [ "$ENABLE_LOKI_OUTPUT" != "true" ] && [ "$ENABLE_MIMIR_OUTPUT" != "true" ]; then
-        echo "WARN: TELEMETRY_ENABLE=true but both ENABLE_LOKI_OUTPUT and ENABLE_MIMIR_OUTPUT are false; skipping telemetry ingestion"
+        log_warn "TELEMETRY_ENABLE=true but both ENABLE_LOKI_OUTPUT and ENABLE_MIMIR_OUTPUT are false; skipping telemetry ingestion"
         inject_telemetry="false"
     fi
     inject_telemetry_loki="false"
@@ -138,13 +158,13 @@ compose_runtime_config() {
         fi
         missing="$(unreadable_fragments $telemetry_fragments)"
         if [ -n "$missing" ]; then
-            echo "ERROR: missing telemetry fragments: $missing"
+            log_error "missing telemetry fragments: $missing"
             exit 1
         fi
 
         socket_dir="$("$BUSYBOX_BIN" dirname "$MOVAI_TELEMETRY_SOCKET")"
         if [ ! -d "$socket_dir" ]; then
-            echo "ERROR: TELEMETRY_ENABLE=true but $socket_dir is not mounted"
+            log_error "TELEMETRY_ENABLE=true but $socket_dir is not mounted"
             exit 1
         fi
 
@@ -182,19 +202,15 @@ compose_runtime_config() {
     "$BUSYBOX_BIN" rm -f "$WORK_CONFIG"
 }
 
+log_info "MOV.AI Log Agent starting (hostname=$FLUENT_BIT_HOSTNAME, app=${APP_NAME:-default})"
+
 # Select configuration file based on feature flags
 if [ "$ENABLE_ADVANCED_PARSING" = "true" ]; then
     BASE_CONFIG_FILE="/fluent-bit/etc/fluent-bit-advanced-parsing.yaml"
-    echo "✓ Advanced parsing enabled (service routing + lua + structured parsers)"
-    if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
-        echo "✓ Host security ingestion enabled"
-    fi
+    PARSING_MODE="advanced (service routing + lua + structured parsers)"
 else
     BASE_CONFIG_FILE="/fluent-bit/etc/fluent-bit.yaml"
-    echo "✗ Advanced parsing disabled (generic parsing only)"
-    if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
-        echo "✓ Host security ingestion enabled"
-    fi
+    PARSING_MODE="generic"
 fi
 
 CONFIG_FILE="/tmp/fluent-bit-runtime.yaml"
@@ -211,21 +227,21 @@ if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
     # NOTE: Fluent Bit systemd inputs currently read from /hostfs/var/log/journal only.
 
     if [ "$has_persistent_journal" = "true" ]; then
-        echo "✓ Security source available: journald (/hostfs/var/log/journal)"
+        log_detail "security source available: journald (/hostfs/var/log/journal)"
     else
-        echo "⚠ Security source unavailable: /hostfs/var/log/journal"
+        log_warn "security source unavailable: /hostfs/var/log/journal"
     fi
 
     if [ "$has_audit_log" = "true" ]; then
-        echo "✓ Security source available: audit.log"
+        log_detail "security source available: audit.log"
     else
-        echo "⚠ Security source unavailable: /hostfs/var/log/audit/audit.log"
+        log_warn "security source unavailable: /hostfs/var/log/audit/audit.log"
     fi
 
     if [ "$has_auth_log" = "true" ]; then
-        echo "✓ Security source available: auth fallback logs"
+        log_detail "security source available: auth fallback logs"
     else
-        echo "⚠ Security source unavailable: auth fallback logs (/hostfs/var/log/auth.log, /hostfs/var/log/secure)"
+        log_warn "security source unavailable: auth fallback logs (/hostfs/var/log/auth.log, /hostfs/var/log/secure)"
     fi
 
     if [ "$SECURITY_LOGS_STRICT" = "true" ] \
@@ -233,74 +249,60 @@ if [ "$SECURITY_LOGS_ENABLE" = "true" ]; then
         && [ "$has_runtime_journal" = "false" ] \
         && [ "$has_audit_log" = "false" ] \
         && [ "$has_auth_log" = "false" ]; then
-        echo "ERROR: SECURITY_LOGS_STRICT=true but no host security log source is available"
+        log_error "SECURITY_LOGS_STRICT=true but no host security log source is available"
         exit 1
     fi
 fi
 
-# Log feature flag configuration
-echo "=== Fluent Bit Feature Flags ==="
-echo "Config: $CONFIG_FILE"
-echo "ENABLE_ADVANCED_PARSING: $ENABLE_ADVANCED_PARSING"
-echo "SECURITY_LOGS_ENABLE: $SECURITY_LOGS_ENABLE"
-echo "SECURITY_LOGS_STRICT: $SECURITY_LOGS_STRICT"
-echo "TELEMETRY_ENABLE: $TELEMETRY_ENABLE"
-echo "ENABLE_LOKI_OUTPUT: $ENABLE_LOKI_OUTPUT"
-echo "ENABLE_MIMIR_OUTPUT: $ENABLE_MIMIR_OUTPUT"
-echo "ENABLE_COMPRESSION: $ENABLE_COMPRESSION"
-echo "ENABLE_STORAGE_METRICS: $ENABLE_STORAGE_METRICS"
-echo "ENABLE_HTTP_METRICS: $ENABLE_HTTP_METRICS"
-echo "ENABLE_TELEMETRY_COMPRESSION: $ENABLE_TELEMETRY_COMPRESSION"
-
-# Check Loki availability
-if [ "$ENABLE_LOKI_OUTPUT" != "true" ]; then
-    echo "Loki disabled: ENABLE_LOKI_OUTPUT=false (Loki outputs/filters skipped for performance)"
-elif [ -z "$LOKI_HOST" ]; then
-    echo "Loki disabled: LOKI_HOST not set (logs will be buffered locally but not sent to any log-aggregator)"
-else
-    echo "Loki enabled: LOKI_HOST=$LOKI_HOST"
-fi
-
-if [ "$ENABLE_MIMIR_OUTPUT" != "true" ]; then
-    echo "Mimir disabled: ENABLE_MIMIR_OUTPUT=false (telemetry OTLP output skipped for performance)"
-fi
-
-if [ "$TELEMETRY_ENABLE" = "true" ]; then
-    echo "Telemetry enabled: socket=$MOVAI_TELEMETRY_SOCKET, mimir=$MIMIR_HOST:$MIMIR_PORT"
-fi
-echo ""
-
 # Convert boolean flags to actual fluent-bit values and export them
 if [ "$ENABLE_COMPRESSION" = "true" ]; then
     ENABLE_COMPRESSION="snappy"
-    echo "✓ Snappy compression enabled"
 else
     ENABLE_COMPRESSION="off"
-    echo "✗ Snappy compression disabled"
 fi
 
 if [ "$ENABLE_TELEMETRY_COMPRESSION" = "true" ]; then
     ENABLE_TELEMETRY_COMPRESSION="gzip"
-    echo "✓ Telemetry compression enabled"
 else
     ENABLE_TELEMETRY_COMPRESSION="none"
-    echo "✗ Telemetry compression disabled"
 fi
 
 if [ "$ENABLE_STORAGE_METRICS" = "true" ]; then
     ENABLE_STORAGE_METRICS="on"
-    echo "✓ Storage metrics enabled"
 else
     ENABLE_STORAGE_METRICS="off"
-    echo "✗ Storage metrics disabled"
 fi
 
-if [ "$ENABLE_HTTP_METRICS" = "true" ]; then
-    ENABLE_HTTP_METRICS="true"
-    echo "✓ HTTP metrics server enabled"
-else
+if [ "$ENABLE_HTTP_METRICS" != "true" ]; then
     ENABLE_HTTP_METRICS="false"
-    echo "✗ HTTP metrics server disabled"
+fi
+
+# Effective configuration summary
+if [ "$ENABLE_LOKI_OUTPUT" != "true" ]; then
+    LOKI_TARGET="disabled (ENABLE_LOKI_OUTPUT=false)"
+elif [ -z "$LOKI_HOST" ]; then
+    LOKI_TARGET="disabled (LOKI_HOST not set)"
+    log_warn "LOKI_HOST not set: logs are buffered locally but not sent to any log-aggregator"
+else
+    LOKI_TARGET="${LOKI_HOST}:${LOKI_PORT:-3100}"
+fi
+
+if [ "$ENABLE_MIMIR_OUTPUT" != "true" ]; then
+    MIMIR_TARGET="disabled"
+elif [ "$inject_telemetry" != "true" ]; then
+    MIMIR_TARGET="unused (telemetry disabled)"
+else
+    MIMIR_TARGET="${MIMIR_HOST}:${MIMIR_PORT}"
+fi
+
+log_info "config: $CONFIG_FILE"
+log_info "parsing: $PARSING_MODE"
+log_info "sources: containers=enabled, security=$inject_security (strict=$SECURITY_LOGS_STRICT), telemetry=$inject_telemetry"
+log_info "outputs: loki=$LOKI_TARGET, mimir=$MIMIR_TARGET"
+log_info "tuning: compression=$ENABLE_COMPRESSION, telemetry_compression=$ENABLE_TELEMETRY_COMPRESSION, storage_metrics=$ENABLE_STORAGE_METRICS, http_metrics=$ENABLE_HTTP_METRICS, flush=${FLUSH_INTERVAL}s"
+
+if [ "$inject_telemetry" = "true" ]; then
+    log_detail "telemetry socket: $MOVAI_TELEMETRY_SOCKET"
 fi
 
 # Export all variables for fluent-bit to use
@@ -323,6 +325,5 @@ export FLUENT_BIT_LOKI_TOTAL_LIMIT_SIZE
 export FLUENT_BIT_BUFFER_MAX_SIZE
 export FLUENT_BIT_HOSTNAME
 
-echo ""
-echo "Starting Fluent Bit with config: $CONFIG_FILE"
+log_info "starting fluent-bit (config=$CONFIG_FILE)"
 exec /fluent-bit/bin/fluent-bit -c "$CONFIG_FILE" "$@"
