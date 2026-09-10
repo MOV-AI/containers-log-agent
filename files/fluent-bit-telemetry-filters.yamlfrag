@@ -17,6 +17,7 @@
       value_field: value
       label_field:
         - metric_name
+        - metric_group
         - robot
         - service
         - flow

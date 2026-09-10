@@ -21,7 +21,7 @@
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=movai_telemetry
-      label_keys: $telemetry_type,$event_type,$robot,$service,$alert_id,$severity,$flow,$node
+      label_keys: $telemetry_type,$event_type,$metric_group,$robot,$service,$alert_id,$severity,$flow,$node
       line_format: json
       compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
@@ -55,7 +55,7 @@
       host: ${LOKI_HOST}
       port: ${LOKI_PORT}
       labels: source=movai_alerts
-      label_keys: $telemetry_type,$alert,$alert_id,$robot,$fleet,$service,$deactivation_type
+      label_keys: $telemetry_type,$alert_id,$robot,$fleet,$service,$deactivation_type
       line_format: json
       compress: ${ENABLE_TELEMETRY_COMPRESSION}
       workers: 1
