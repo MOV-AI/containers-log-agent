@@ -1,0 +1,79 @@
+    # Logs output to Loki
+    - name: loki
+      match: docker.*
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=docker
+      # label_keys specifies which fields from the log record should be included as labels in Loki
+      # This allows for efficient querying and filtering based on these fields.
+      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
+      label_keys: $container_name,$service,$robot,$user_log,$level
+      # remove_keys specifies which fields should be removed from the log record before sending to Loki
+      # This is useful for excluding fields that are not needed in Loki
+      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
+      remove_keys: container_id,lineno,module,funcName
+      line_format: key_value
+      compress: ${ENABLE_COMPRESSION}
+      workers: 2
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8
+
+    - name: loki
+      match: movai.logs
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=docker
+      # label_keys specifies which fields from the log record should be included as labels in Loki
+      # This allows for efficient querying and filtering based on these fields.
+      # Warning: including too many or high-cardinality fields (more than 100 unique values) as labels can lead to performance issues in Loki.
+      label_keys: $container_name,$service,$robot,$user_log,$ui,$has_ui,$has_node,$level
+      # remove_keys specifies which fields should be removed from the log record before sending to Loki
+      # This is useful for excluding fields that are not needed in Loki
+      # Note: it improves performance and reduces storage costs by not sending unnecessary data.
+      remove_keys: container_id,lineno,module,funcName
+      line_format: key_value
+      compress: ${ENABLE_COMPRESSION}
+      workers: 2
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 8
+
+    - name: loki
+      match: metrics.*
+      log_level: ${LOG_LEVEL}
+      host: ${LOKI_HOST}
+      port: ${LOKI_PORT}
+      labels: source=metrics
+      line_format: key_value
+      compress: ${ENABLE_COMPRESSION}
+      workers: 1
+      retry_limit: false
+      net.dns.mode: TCP
+      net.connect_timeout: 15s
+      net.io_timeout: 60s
+      net.keepalive: true
+      net.keepalive_idle_timeout: 90s
+      net.tcp_keepalive: true
+      net.tcp_keepalive_time: 30
+      net.tcp_keepalive_interval: 10
+      net.tcp_keepalive_probes: 6
+      net.max_worker_connections: 4

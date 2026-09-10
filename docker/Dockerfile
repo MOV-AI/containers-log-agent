@@ -46,6 +46,8 @@ ENV ENABLE_STORAGE_METRICS=false
 ENV ENABLE_HTTP_METRICS=false
 ENV TELEMETRY_ENABLE=false
 ENV ENABLE_TELEMETRY_COMPRESSION=true
+ENV ENABLE_LOKI_OUTPUT=true
+ENV ENABLE_MIMIR_OUTPUT=true
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["/bin/busybox", "pidof", "fluent-bit"]
 
