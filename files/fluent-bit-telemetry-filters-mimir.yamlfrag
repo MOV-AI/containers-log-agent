@@ -13,5 +13,7 @@
         - service
         - flow
         - node
+        - pattern
+        - active
         - alert_id
         - event_type
