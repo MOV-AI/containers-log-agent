@@ -6,6 +6,11 @@
       metric_name: movai_metric_value
       metric_description: MOVAI numeric telemetry value
       value_field: value
+      # Emit one snapshot of all series per interval; without it every record re-emits
+      # the full snapshot and floods the emitter, back-pressuring the forward socket.
+      flush_interval_sec: 10
+      flush_interval_nsec: 0
+      emitter_mem_buf_limit: 20M
       label_field:
         - metric_name
         - metric_group
